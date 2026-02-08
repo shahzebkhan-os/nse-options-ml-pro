@@ -7,159 +7,196 @@ from src.ui.charts import plot_interactive_chart
 from src.ui.payoff import plot_payoff_diagram
 from src.features.indicators import compute_indicators
 
-st.set_page_config(page_title="NIFTY Options AI", layout="wide")
+# --- Configuration ---
+st.set_page_config(
+    page_title="NIFTY Options AI",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.sidebar.title("⚙️ Settings")
-st.sidebar.markdown("### Telegram Alerts")
-tg_token = st.sidebar.text_input("Bot Token", type="password")
-tg_chat_id = st.sidebar.text_input("Chat ID")
-send_alerts = st.sidebar.checkbox("Enable Alerts")
+# Custom CSS for better look
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #262730;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .big-font {
+        font-size: 24px !important;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-st.title("🤖 NIFTY50 Options AI Strategy Engine")
-st.markdown("Use Machine Learning to detect **Volatility Regimes** and suggest Option Strategies.")
-st.markdown("---")
+# --- Sidebar ---
+with st.sidebar:
+    st.title("⚙️ Control Panel")
+    
+    st.subheader("Market Scope")
+    category = "Large Cap (Nifty 50)" # Fixed based on backtest
+    stock_list = ALL_STOCKS[category]
+    st.info(f"Active List: {category}\n(Top {len(stock_list)} Stocks)")
 
-# Initialize Predictor
+    st.markdown("---")
+    st.subheader("📡 Watchlist Scanner")
+    scan_limit = st.slider("Scan Depth", 5, 50, 10)
+    run_scan = st.button("🚀 Scan Market Now")
+    
+    st.markdown("---")
+    st.subheader("🔔 Alerts")
+    tg_token = st.text_input("Bot Token", type="password")
+    tg_chat_id = st.text_input("Chat ID")
+    send_alerts = st.checkbox("Enable Telegram Alerts")
+
+# --- Initialize ---
 @st.cache_resource
 def get_predictor():
     pred = VolatilityPredictor()
-    # Pre-train on a representative stock to initialize model weights
     pred.train("RELIANCE") 
     return pred
 
 predictor = get_predictor()
 
-col1, col2 = st.columns([1, 1])
+# --- Main Page ---
+st.title("🤖 NIFTY50 Options AI Engine")
+st.markdown(f"**AI-Powered Volatility Regime Detection & Strategy Generator** | *Model Accuracy: ~80%*")
 
-with col1:
-    st.header("Analyze Stock")
+# --- Stock Selector Row ---
+col_sel1, col_sel2 = st.columns([1, 4])
+with col_sel1:
+    symbol = st.selectbox("Select Stock", stock_list, index=0)
+with col_sel2:
+    st.write("") # Spacer
+    st.write("") 
+    run_analysis = st.button("🔍 Analyze Stock", type="primary")
+
+# --- Main Logic ---
+
+# 1. SCANNER LOGIC (Sidebar Trigger)
+if run_scan:
+    st.divider()
+    st.subheader(f"🔍 Market Scan Results (Top {scan_limit})")
     
-    # Category Selection - Default to Large Cap
-    # Removed selector to enforce Large Cap only based on backtest results
-    category = "Large Cap (Nifty 50)"
-    stock_list = ALL_STOCKS[category]
+    results = []
+    progress = st.progress(0)
+    status_text = st.empty()
     
-    st.caption("✅ Optimized for NIFTY 50 Large Cap Stocks (80%+ Accuracy)")
-    symbol = st.selectbox("Select Symbol", stock_list)
+    watchlist = stock_list[:scan_limit]
     
-    if st.button("Run Analysis"):
-        with st.spinner(f"Analyzing {symbol}..."):
-            result = predictor.predict(symbol)
+    for i, stock in enumerate(watchlist):
+        status_text.caption(f"Scanning {stock} ({i+1}/{len(watchlist)})...")
+        res = predictor.predict(stock)
+        if res:
+            row = {
+                "Symbol": res["Symbol"],
+                "Price": f"₹{res['Live_Price']:.2f}",
+                "Change": f"{res['Pct_Change']:.2f}%",
+                "Regime": res["Regime"],
+                "Conf": res["Confidence"],
+                "PCR": res["Options"]["PCR_OI"] if res["Options"] else 0,
+            }
+            results.append(row)
+        progress.progress((i + 1) / len(watchlist))
+        
+    status_text.empty()
+    if results:
+        df = pd.DataFrame(results)
+        
+        # Color styling
+        def highlight_regime(val):
+            color = 'red' if 'HIGH' in val else 'green'
+            return f'color: {color}; font-weight: bold'
+
+        st.dataframe(
+            df.style.applymap(highlight_regime, subset=['Regime']),
+            use_container_width=True,
+            height=400
+        )
+    else:
+        st.warning("No data found.")
+
+# 2. ANALYSIS LOGIC (Main Button)
+if run_analysis:
+    with st.spinner(f"Running AI Models on {symbol}..."):
+        result = predictor.predict(symbol)
+        
+    if result:
+        # --- Signal Card ---
+        with st.container():
+            # Color code based on regime
+            is_high_vol = "HIGH" in result["Regime"]
+            color_emoji = "🚨" if is_high_vol else "💤"
             
-            if result:
-                st.success("Analysis Complete")
-                
-                # --- Live Price Header ---
-                p_col1, p_col2 = st.columns([1, 3])
-                with p_col1:
-                    st.metric("Live Price", 
-                             f"₹{result['Live_Price']:.2f}", 
-                             f"{result['Price_Change']:.2f} ({result['Pct_Change']:.2f}%)")
-                
-                # --- Main ML Prediction ---
-                st.subheader("🤖 AI Prediction")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Regime", result["Regime"])
-                m2.metric("Confidence", result["Confidence"])
-                m3.metric("Prob > 1.5% Move", f"{result['Prob_High_Vol']:.2f}")
-                
-                st.info(f"**Recommended Strategy:** {result['Strategy']}")
-                
-                # --- VISUALIZATION TAB ---
-                st.markdown("---")
-                tab1, tab2, tab3 = st.tabs(["📈 Technical Chart", "💰 Strategy Payoff", "📰 Sentiment"])
-                
-                with tab1:
-                    # Fetch data again for plotting (efficient caching handles this)
-                    df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
-                    df_chart = compute_indicators(df_chart) # Add bands
-                    fig_chart = plot_interactive_chart(df_chart, symbol)
-                    st.plotly_chart(fig_chart, use_container_width=True)
-                    
-                with tab2:
-                    fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
-                    st.plotly_chart(fig_payoff, use_container_width=True)
-                    st.caption(f"ℹ️ **Strategy Logic:** {desc}")
-                    
-                with tab3:
-                    sent = result["Sentiment"]
-                    s1, s2 = st.columns([1, 3])
-                    s1.metric("Sentiment Score", f"{sent['Score']:.2f}", sent["Label"])
-                    with s2:
-                        if sent["Headlines"]:
-                            for h in sent["Headlines"]:
-                                st.write(f"- {h}")
-                        else:
-                            st.caption("No recent news found.")
+            # Top Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Live Price", f"₹{result['Live_Price']:.2f}", f"{result['Price_Change']:.2f} ({result['Pct_Change']:.2f}%)")
+            m2.metric("AI Confidence", result["Confidence"])
+            m3.metric("Big Move Prob", f"{result['Prob_High_Vol']:.2f}")
+            m4.metric("PCR (OI)", result["Options"]["PCR_OI"] if result["Options"] else "N/A")
 
-                # --- Option Chain ---
-                st.markdown("---")
-                st.subheader("⛓️ Option Chain Data")
-                opt = result["Options"]
-                if opt:
-                    o1, o2, o3 = st.columns(3)
-                    o1.metric("PCR (OI)", opt["PCR_OI"])
-                    o2.metric("Max Pain", opt["Max_Pain"])
-                    o3.metric("Expiry", str(opt["Expiry"]))
+            # The Verdict
+            st.divider()
+            v_col1, v_col2 = st.columns([2, 1])
+            
+            with v_col1:
+                st.subheader(f"{color_emoji} {result['Regime']}")
+                st.caption("AI Detected Market Condition")
+                
+                if is_high_vol:
+                    st.error(f"Strategy: **{result['Strategy']}**")
+                    st.markdown("*Expect significant price movement. Buy Volatility.*")
                 else:
-                    st.warning("Option Chain data unavailable (Market Closed/No Data).")
-                    
-                # --- Fundamentals ---
-                st.markdown("---")
-                st.subheader("📊 Fundamentals")
+                    st.success(f"Strategy: **{result['Strategy']}**")
+                    st.markdown("*Expect range-bound action. Sell Volatility / Eat Theta.*")
+            
+            with v_col2:
+                # Mini Sentiment
+                sent = result["Sentiment"]
+                s_color = "green" if sent["Label"] == "BULLISH" else "red" if sent["Label"] == "BEARISH" else "gray"
+                st.markdown(f"**News Sentiment:** :{s_color}[{sent['Label']}]")
+                st.progress((sent['Score'] + 1) / 2) # Normalize -1..1 to 0..1
+
+        # --- Visualizations ---
+        st.divider()
+        tab_chart, tab_payoff, tab_fund = st.tabs(["📈 Technical Chart", "💰 Payoff Diagram", "📊 Deep Dive"])
+        
+        with tab_chart:
+            df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
+            df_chart = compute_indicators(df_chart)
+            fig_chart = plot_interactive_chart(df_chart, symbol)
+            st.plotly_chart(fig_chart, use_container_width=True)
+            
+        with tab_payoff:
+            fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
+            st.plotly_chart(fig_payoff, use_container_width=True)
+            st.info(desc)
+            
+        with tab_fund:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### Fundamentals")
                 fun = result["Fundamentals"]
                 if fun:
-                    f1, f2, f3, f4 = st.columns(4)
-                    f1.metric("P/E Ratio", fun.get("PE_Ratio", "N/A"))
-                    f2.metric("Mkt Cap (Cr)", fun.get("Market_Cap_Cr", "N/A"))
-                    f3.metric("Div Yield", f"{fun.get('Dividend_Yield', 0)}%")
-                    f4.metric("Sector", fun.get("Sector", "N/A"))
-                
-                # --- Alerts ---
-                if send_alerts and "HIGH" in result["Regime"]:
-                    msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
-                    if send_telegram_alert(tg_token, tg_chat_id, msg):
-                        st.toast("Alert Sent to Telegram!", icon="✅")
-            else:
-                st.error("Failed to fetch data.")
+                    st.json(fun)
+                else:
+                    st.write("No data.")
+            with c2:
+                st.markdown("### Option Chain Stats")
+                opt = result["Options"]
+                if opt:
+                    st.write(f"**Max Pain:** {opt['Max_Pain']}")
+                    st.write(f"**Call OI Chg:** {opt['Call_OI_Change']}")
+                    st.write(f"**Put OI Chg:** {opt['Put_OI_Change']}")
+                else:
+                    st.write("No Option Chain data.")
 
-with col2:
-    st.header(f"Market Watchlist ({category})")
-    
-    # Allow user to limit scan size
-    scan_limit = st.slider("Stocks to Scan", min_value=5, max_value=len(stock_list), value=10)
-    
-    if st.button("Scan List"):
-        results = []
-        # Take the first N stocks from the selected category
-        watchlist = stock_list[:scan_limit]
-        
-        progress = st.progress(0)
-        status_text = st.empty()
-        
-        for i, stock in enumerate(watchlist):
-            status_text.text(f"Scanning {stock}...")
-            res = predictor.predict(stock)
-            if res:
-                # Flatten for table
-                row = {
-                    "Symbol": res["Symbol"],
-                    "Price": f"₹{res['Live_Price']:.2f}",
-                    "Change": f"{res['Pct_Change']:.2f}%",
-                    "Regime": res["Regime"],
-                    "Conf": res["Confidence"],
-                    "Sentiment": res["Sentiment"]["Label"],
-                    "PCR": res["Options"]["PCR_OI"] if res["Options"] else 0,
-                    "PE": res["Fundamentals"].get("PE_Ratio", 0) if res["Fundamentals"] else 0
-                }
-                results.append(row)
-            progress.progress((i + 1) / len(watchlist))
-            
-        status_text.text("Scan Complete!")
-        
-        if results:
-            df = pd.DataFrame(results)
-            # Styling
-            st.dataframe(df.style.applymap(lambda x: 'color: red' if 'HIGH' in str(x) else 'color: green', subset=['Regime']))
-        else:
-            st.warning("No results found.")
+        # --- Alerts Trigger ---
+        if send_alerts and is_high_vol:
+            msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
+            send_telegram_alert(tg_token, tg_chat_id, msg)
+
+    else:
+        st.error("Could not fetch data for this symbol.")
