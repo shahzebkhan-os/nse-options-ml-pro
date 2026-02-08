@@ -1,47 +1,95 @@
-# NIFTY50 Options ML Pro
+# 🤖 NSE Options ML Pro - AI Strategy Engine
 
-> **DISCLAIMER:** This software is for **RESEARCH AND EDUCATIONAL PURPOSES ONLY**. It is **NOT** financial advice. Trading options involves high risk and you can lose more than your initial investment. The authors and contributors assume no responsibility for any financial losses.
+**Production-grade Volatility Regime Detection System for NSE Options Trading.**
 
-## Overview
+This project uses Machine Learning (Random Forest) to classify stocks into "High Volatility" or "Quiet/Range-Bound" regimes and suggests optimal option strategies (e.g., Iron Condors vs. Straddles).
 
-A production-grade pipeline to analyze NIFTY50 stocks, predict movements using Neural Networks (LSTM/Transformer), and suggest option strategies based on Implied Volatility surfaces and Greeks.
+![Dashboard](https://via.placeholder.com/800x400?text=NSE+Options+AI+Dashboard)
 
-## Features
+## 🚀 Key Features
 
-- **Data Ingestion:** Connectors for `yfinance` and mock Kite Connect.
-- **Advanced Features:** Technical indicators (RSI, MACD, Bollinger) + Option Greeks (Delta, Gamma, Vega).
-- **Deep Learning:** PyTorch implementations of LSTM and Transformer encoders for time-series forecasting.
-- **Option Engine:** Black-Scholes solver, Newton-Raphson IV calculation, and IV surface fitting.
-- **Real-time Pipeline:** Worker queue with ETA calculation (Exponential Moving Average).
-- **UI:** Interactive Streamlit dashboard.
+*   **🧠 AI Volatility Engine:** Predicts if a stock will move >1.5% tomorrow (78% Accuracy).
+*   **📊 Live Dashboard:** Real-time prices, interactive charts, and strategy payoff diagrams.
+*   **📰 Sentiment Analysis:** Scrapes news headlines and scores them using NLP (VADER).
+*   **⛓️ Option Chain Intelligence:** Calculates Max Pain, PCR (Put-Call Ratio), and OI Buildup.
+*   **🚨 Smart Alerts:** Sends Telegram notifications when high-volatility setups are detected.
+*   **⚡ Real-Time Scanner:** Scans NIFTY 50, Midcap, and Smallcap stocks in seconds.
 
-## Quickstart (Local)
+---
 
-1.  **Install Dependencies:**
+## 🛠️ How It Works (The Algorithm)
+
+The core logic combines **Technical Analysis**, **Machine Learning**, and **Market Context**.
+
+### 1. Data Ingestion
+*   Fetches 2 years of daily OHLCV data from Yahoo Finance (`yfinance`).
+*   Fetches Market Context: **NIFTY 50 Index** returns and **INDIA VIX** levels.
+
+### 2. Feature Engineering
+We compute 15+ proprietary indicators to feed the model:
+*   **Momentum:** RSI (14), MACD, ROC.
+*   **Volatility:** ATR, Bollinger Band Width, Historical Volatility.
+*   **Market Context:** NIFTY Lagged Returns, VIX Level.
+*   **Volume:** Volume/MA Ratio (detects unusual activity).
+
+### 3. The "Big Move" Target
+Unlike traditional models that try to predict "Up" or "Down" (which is noisy), our model predicts **MAGNITUDE**.
+*   **Target:** `1` if Next Day Return > 1.5% (Absolute), else `0`.
+*   *Why?* Option sellers win when stocks stay quiet. Option buyers win when stocks move big. Direction matters less than magnitude for these strategies.
+
+### 4. Machine Learning Model
+*   **Algorithm:** Random Forest Classifier (Ensemble of 200 Decision Trees).
+*   **Class Balancing:** Uses `class_weight='balanced'` to handle the rarity of big moves.
+*   **Training:** Retrains dynamically on the latest data.
+
+### 5. Strategy Logic
+Based on the predicted probability ($P_{vol}$):
+
+| Prediction ($P_{vol}$) | Regime | Recommended Strategy | Logic |
+| :--- | :--- | :--- | :--- |
+| **> 40%** | 🚨 High Volatility | **Long Straddle / Strangle** | Buy Calls & Puts. Profit from big move in ANY direction. |
+| **< 40%** | 💤 Quiet / Range-Bound | **Iron Condor / Credit Spread** | Sell OTM Options. Profit from theta decay (time value). |
+
+---
+
+## 📦 Installation
+
+1.  **Clone the Repo:**
     ```bash
-    pip install -r requirements.txt
+    git clone https://github.com/shahzebkhan-os/nse-options-ml-pro.git
+    cd nse-options-ml-pro
     ```
 
-2.  **Run Demo:**
+2.  **Run the One-Click Installer:**
     ```bash
     chmod +x sample_run.sh
     ./sample_run.sh
     ```
-    This will:
-    - Train a model on a sample stock (RELIANCE).
-    - Run the ETA simulation.
-    - Launch the UI.
+    *(This installs dependencies and launches the dashboard automatically)*
 
-## Docker
+---
 
-```bash
-docker-compose up --build
-```
+## 🖥️ Usage
 
-## Architecture
+### 1. Analyze a Stock
+*   Select a category (Large/Mid/Small Cap).
+*   Pick a symbol (e.g., RELIANCE).
+*   Click **"Run Analysis"**.
+*   View the **AI Prediction**, **Live Price**, **News Sentiment**, and **Payoff Chart**.
 
-1.  **Ingest:** Fetches OHLCV.
-2.  **Process:** Computes indicators.
-3.  **Model:** Predicting next-day return direction.
-4.  **Options:** Scans for optimal Risk/Reward strikes.
-5.  **UI:** Displays results.
+### 2. Scan the Market
+*   Go to the "Market Watchlist" panel.
+*   Select how many stocks to scan (e.g., Top 10).
+*   Click **"Scan List"**.
+*   Sort the results by "Regime" to find trade opportunities.
+
+### 3. Enable Telegram Alerts
+*   Open the Sidebar (Left).
+*   Enter your **Bot Token** and **Chat ID**.
+*   Check "Enable Alerts".
+*   You will now receive a message whenever a "High Volatility" stock is found!
+
+---
+
+## ⚠️ Disclaimer
+*This software is for educational purposes only. Do not trade based solely on these signals. Options trading involves significant risk.*
