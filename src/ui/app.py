@@ -37,6 +37,12 @@ with col1:
     
     symbol = st.selectbox("Select Symbol", stock_list)
     
+from src.ui.charts import plot_interactive_chart
+from src.ui.payoff import plot_payoff_diagram
+from src.features.indicators import compute_indicators
+
+# ... (Previous imports)
+
     if st.button("Run Analysis"):
         with st.spinner(f"Analyzing {symbol}..."):
             result = predictor.predict(symbol)
@@ -60,19 +66,32 @@ with col1:
                 
                 st.info(f"**Recommended Strategy:** {result['Strategy']}")
                 
-                # --- Sentiment Analysis ---
+                # --- VISUALIZATION TAB ---
                 st.markdown("---")
-                st.subheader("📰 Sentiment Analysis (News)")
-                sent = result["Sentiment"]
-                s1, s2 = st.columns([1, 3])
-                s1.metric("Sentiment", sent["Label"], f"{sent['Score']:.2f}")
-                with s2:
-                    if sent["Headlines"]:
-                        with st.expander("Recent Headlines"):
+                tab1, tab2, tab3 = st.tabs(["📈 Technical Chart", "💰 Strategy Payoff", "📰 Sentiment"])
+                
+                with tab1:
+                    # Fetch data again for plotting (efficient caching handles this)
+                    df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
+                    df_chart = compute_indicators(df_chart) # Add bands
+                    fig_chart = plot_interactive_chart(df_chart, symbol)
+                    st.plotly_chart(fig_chart, use_container_width=True)
+                    
+                with tab2:
+                    fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
+                    st.plotly_chart(fig_payoff, use_container_width=True)
+                    st.caption(f"ℹ️ **Strategy Logic:** {desc}")
+                    
+                with tab3:
+                    sent = result["Sentiment"]
+                    s1, s2 = st.columns([1, 3])
+                    s1.metric("Sentiment Score", f"{sent['Score']:.2f}", sent["Label"])
+                    with s2:
+                        if sent["Headlines"]:
                             for h in sent["Headlines"]:
                                 st.write(f"- {h}")
-                    else:
-                        st.caption("No recent news found.")
+                        else:
+                            st.caption("No recent news found.")
 
                 # --- Option Chain ---
                 st.markdown("---")
@@ -82,7 +101,7 @@ with col1:
                     o1, o2, o3 = st.columns(3)
                     o1.metric("PCR (OI)", opt["PCR_OI"])
                     o2.metric("Max Pain", opt["Max_Pain"])
-                    o3.metric("Expiry", opt["Expiry"])
+                    o3.metric("Expiry", str(opt["Expiry"]))
                 else:
                     st.warning("Option Chain data unavailable (Market Closed/No Data).")
                     
@@ -99,11 +118,10 @@ with col1:
                 
                 # --- Alerts ---
                 if send_alerts and "HIGH" in result["Regime"]:
-                    msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nConf: {result['Confidence']}\nStrategy: {result['Strategy']}"
+                    msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
                     if send_telegram_alert(tg_token, tg_chat_id, msg):
                         st.toast("Alert Sent to Telegram!", icon="✅")
-                    else:
-                        st.toast("Failed to send alert.", icon="❌")
+
                         
             else:
                 st.error("Failed to fetch data.")

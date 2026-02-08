@@ -35,19 +35,48 @@ class DataConnector:
             return None
 
     def get_live_price(self, symbol):
-        """Fetches the latest real-time price using yfinance fast_info."""
+        """Fetches the latest real-time price using robust fallbacks."""
         ticker_name = f"{symbol}.NS" if not symbol.endswith(".NS") and not symbol.startswith("^") else symbol
+        
         try:
             ticker = yf.Ticker(ticker_name)
-            # fast_info is faster and often more up-to-date than .info
-            price = ticker.fast_info.get('last_price')
-            prev_close = ticker.fast_info.get('previous_close')
+            price = 0.0
+            prev_close = 0.0
             
-            if price and prev_close:
+            # Method 1: fast_info (Best for live market)
+            try:
+                price = ticker.fast_info.last_price
+                prev_close = ticker.fast_info.previous_close
+            except:
+                pass
+                
+            # Method 2: history (Best for post-market/if fast_info fails)
+            if not price or pd.isna(price):
+                hist = ticker.history(period="1d")
+                if not hist.empty:
+                    price = hist["Close"].iloc[-1]
+                    # Estimate prev close from 2d history if needed, or info
+                    hist_2d = ticker.history(period="2d")
+                    if len(hist_2d) > 1:
+                        prev_close = hist_2d["Close"].iloc[-2]
+            
+            # Method 3: info (Slowest)
+            if (not price or pd.isna(price)) and 'currentPrice' in ticker.info:
+                price = ticker.info['currentPrice']
+                prev_close = ticker.info.get('previousClose', price)
+
+            # Final check
+            if price and not pd.isna(price):
+                # If prev_close missing, assume 0 change
+                if not prev_close or pd.isna(prev_close):
+                    prev_close = price
+                    
                 change = price - prev_close
                 pct_change = (change / prev_close) * 100
-                return price, change, pct_change
+                return float(price), float(change), float(pct_change)
+                
             return 0.0, 0.0, 0.0
+            
         except Exception as e:
             logger.error(f"Error fetching live price for {symbol}: {e}")
             return 0.0, 0.0, 0.0
