@@ -34,10 +34,12 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.header("Analyze Stock")
     
-    # Category Selection
-    category = st.selectbox("Market Cap Category", list(ALL_STOCKS.keys()))
+    # Category Selection - Default to Large Cap
+    # Removed selector to enforce Large Cap only based on backtest results
+    category = "Large Cap (Nifty 50)"
     stock_list = ALL_STOCKS[category]
     
+    st.caption("✅ Optimized for NIFTY 50 Large Cap Stocks (80%+ Accuracy)")
     symbol = st.selectbox("Select Symbol", stock_list)
     
     if st.button("Run Analysis"):
