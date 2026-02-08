@@ -34,6 +34,24 @@ class DataConnector:
             logger.error(f"Error fetching {ticker}: {e}")
             return None
 
+    def get_live_price(self, symbol):
+        """Fetches the latest real-time price using yfinance fast_info."""
+        ticker_name = f"{symbol}.NS" if not symbol.endswith(".NS") and not symbol.startswith("^") else symbol
+        try:
+            ticker = yf.Ticker(ticker_name)
+            # fast_info is faster and often more up-to-date than .info
+            price = ticker.fast_info.get('last_price')
+            prev_close = ticker.fast_info.get('previous_close')
+            
+            if price and prev_close:
+                change = price - prev_close
+                pct_change = (change / prev_close) * 100
+                return price, change, pct_change
+            return 0.0, 0.0, 0.0
+        except Exception as e:
+            logger.error(f"Error fetching live price for {symbol}: {e}")
+            return 0.0, 0.0, 0.0
+
     def mock_option_chain(self, symbol, spot_price):
         """Generates a mock option chain for demo purposes."""
         logger.info(f"Generating mock option chain for {symbol} at spot {spot_price}")

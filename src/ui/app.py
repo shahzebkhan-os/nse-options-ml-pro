@@ -44,6 +44,13 @@ with col1:
             if result:
                 st.success("Analysis Complete")
                 
+                # --- Live Price Header ---
+                p_col1, p_col2 = st.columns([1, 3])
+                with p_col1:
+                    st.metric("Live Price", 
+                             f"₹{result['Live_Price']:.2f}", 
+                             f"{result['Price_Change']:.2f} ({result['Pct_Change']:.2f}%)")
+                
                 # --- Main ML Prediction ---
                 st.subheader("🤖 AI Prediction")
                 m1, m2, m3 = st.columns(3)
@@ -122,6 +129,8 @@ with col2:
                 # Flatten for table
                 row = {
                     "Symbol": res["Symbol"],
+                    "Price": f"₹{res['Live_Price']:.2f}",
+                    "Change": f"{res['Pct_Change']:.2f}%",
                     "Regime": res["Regime"],
                     "Conf": res["Confidence"],
                     "Sentiment": res["Sentiment"]["Label"],

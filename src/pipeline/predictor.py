@@ -77,10 +77,11 @@ class VolatilityPredictor:
         regime = "HIGH VOLATILITY" if prob > 0.4 else "QUIET / RANGE-BOUND"
         strategy = "LONG STRADDLE/STRANGLE" if prob > 0.4 else "IRON CONDOR / CREDIT SPREAD"
         
-        # 2. Fetch Extra Features (Sentiment, Fundamentals, Options)
+        # 2. Fetch Extra Features (Sentiment, Fundamentals, Options, Live Price)
         sent_score, sent_label, headlines = self.sentiment_engine.get_sentiment(symbol)
         fundamentals = get_fundamentals(symbol)
         options_data = get_option_chain_summary(symbol)
+        live_price, change, pct_change = self.connector.get_live_price(symbol)
         
         return {
             "Symbol": symbol,
@@ -88,6 +89,9 @@ class VolatilityPredictor:
             "Confidence": f"{max(prob, 1-prob)*100:.1f}%",
             "Strategy": strategy,
             "Prob_High_Vol": prob,
+            "Live_Price": live_price,
+            "Price_Change": change,
+            "Pct_Change": pct_change,
             "Sentiment": {
                 "Score": sent_score,
                 "Label": sent_label,
