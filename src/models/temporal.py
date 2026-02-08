@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim=1, num_layers=2):
+    def __init__(self, input_dim, hidden_dim, output_dim=1, num_layers=2, dropout=0.2):
         super(LSTMModel, self).__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
+        self.dropout = nn.Dropout(dropout)
         self.fc = nn.Linear(hidden_dim, output_dim)
         self.sigmoid = nn.Sigmoid()
         
@@ -16,7 +17,8 @@ class LSTMModel(nn.Module):
         c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
         
         out, _ = self.lstm(x, (h0, c0))
-        out = self.fc(out[:, -1, :])
+        out = self.dropout(out[:, -1, :]) # Apply dropout to the last time step output
+        out = self.fc(out)
         return self.sigmoid(out)
 
 class TransformerModel(nn.Module):

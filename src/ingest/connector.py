@@ -11,13 +11,24 @@ class DataConnector:
 
     def fetch_ohlcv(self, symbol, period="1y", interval="1d"):
         """Fetches historical data from yfinance."""
-        ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+        if symbol.startswith("^"):
+            ticker = symbol
+        else:
+            ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+            
         logger.info(f"Fetching data for {ticker}...")
         try:
             df = yf.download(ticker, period=period, interval=interval, progress=False)
             if df.empty:
                 logger.warning(f"No data for {ticker}")
                 return None
+            
+            # Flatten MultiIndex columns if present (common in new yfinance versions)
+            if isinstance(df.columns, pd.MultiIndex):
+                # If level 1 is the ticker, drop it
+                if len(df.columns.levels) > 1:
+                    df.columns = df.columns.get_level_values(0)
+            
             return df
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {e}")
