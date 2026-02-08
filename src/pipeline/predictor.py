@@ -63,6 +63,46 @@ class VolatilityPredictor:
         self.is_trained = True
         logger.info("Model Trained.")
 
+    def suggest_strikes(self, spot_price, strategy, options_data):
+        """Generates specific Strike Prices for the suggested strategy."""
+        if not options_data:
+            return {}
+            
+        atm_strike = round(spot_price / 50) * 50 # Nearest 50
+        expiry = options_data.get("Expiry", "N/A")
+        
+        suggestions = {}
+        
+        if "STRADDLE" in strategy:
+            # Long Straddle: Buy ATM Call & Put
+            suggestions = {
+                "Leg 1 (Buy CE)": f"{atm_strike} CE",
+                "Leg 2 (Buy PE)": f"{atm_strike} PE",
+                "Ideal Expiry": expiry,
+                "Note": "Pure directional volatility play."
+            }
+            
+        elif "IRON CONDOR" in strategy:
+            # Iron Condor: Sell OTM, Buy farther OTM for protection
+            # Short Strikes (Inner Wings) ~ 3% away
+            short_ce = round((spot_price * 1.03) / 50) * 50
+            short_pe = round((spot_price * 0.97) / 50) * 50
+            
+            # Long Strikes (Outer Protection) ~ 5% away
+            long_ce = round((spot_price * 1.05) / 50) * 50
+            long_pe = round((spot_price * 0.95) / 50) * 50
+            
+            suggestions = {
+                "Sell Call (Short)": f"{short_ce} CE",
+                "Buy Call (Hedge)": f"{long_ce} CE",
+                "Sell Put (Short)": f"{short_pe} PE",
+                "Buy Put (Hedge)": f"{long_pe} PE",
+                "Ideal Expiry": expiry,
+                "Note": "Collect premium. Max profit if price stays between Short strikes."
+            }
+            
+        return suggestions
+
     def predict(self, symbol):
         if not self.is_trained:
             self.train("RELIANCE") # Train on proxy if not trained
@@ -77,11 +117,14 @@ class VolatilityPredictor:
         regime = "HIGH VOLATILITY" if prob > 0.4 else "QUIET / RANGE-BOUND"
         strategy = "LONG STRADDLE/STRANGLE" if prob > 0.4 else "IRON CONDOR / CREDIT SPREAD"
         
-        # 2. Fetch Extra Features (Sentiment, Fundamentals, Options, Live Price)
+        # 2. Fetch Extra Features
         sent_score, sent_label, headlines = self.sentiment_engine.get_sentiment(symbol)
         fundamentals = get_fundamentals(symbol)
         options_data = get_option_chain_summary(symbol)
         live_price, change, pct_change = self.connector.get_live_price(symbol)
+        
+        # 3. Generate Specific Strike Suggestions
+        trade_setup = self.suggest_strikes(live_price, strategy, options_data)
         
         return {
             "Symbol": symbol,
@@ -98,5 +141,6 @@ class VolatilityPredictor:
                 "Headlines": headlines
             },
             "Fundamentals": fundamentals,
-            "Options": options_data
+            "Options": options_data,
+            "Trade_Setup": trade_setup
         }

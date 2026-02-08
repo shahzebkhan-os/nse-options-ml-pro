@@ -151,6 +151,17 @@ if run_analysis:
                 else:
                     st.success(f"Strategy: **{result['Strategy']}**")
                     st.markdown("*Expect range-bound action. Sell Volatility / Eat Theta.*")
+                
+                # --- Trade Setup Card ---
+                setup = result.get("Trade_Setup", {})
+                if setup:
+                    st.markdown("#### 🎯 Execution Plan")
+                    # Create a nice grid for the strikes
+                    cols = st.columns(len(setup)-1) # -1 to exclude 'Note'
+                    for i, (key, value) in enumerate(setup.items()):
+                        if key != "Note":
+                            cols[i % len(cols)].metric(key, value)
+                    st.caption(f"📝 *Note: {setup.get('Note', '')}*")
             
             with v_col2:
                 # Mini Sentiment
