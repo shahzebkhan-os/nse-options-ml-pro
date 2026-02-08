@@ -1,11 +1,13 @@
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 from src.ingest.connector import DataConnector
 from src.features.indicators import compute_indicators
+from src.features.sentiment import SentimentEngine
+from src.features.fundamentals import get_fundamentals, get_option_chain_summary
 from src.utils.logger import get_logger
 import joblib
 import os
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
 
 logger = get_logger(__name__)
 
@@ -14,6 +16,7 @@ class VolatilityPredictor:
         self.model = RandomForestClassifier(n_estimators=200, max_depth=5, 
                                           class_weight='balanced', random_state=42)
         self.connector = DataConnector()
+        self.sentiment_engine = SentimentEngine()
         self.is_trained = False
 
     def prepare_data(self, symbol, period="2y"):
@@ -64,7 +67,7 @@ class VolatilityPredictor:
         if not self.is_trained:
             self.train("RELIANCE") # Train on proxy if not trained
             
-        # Fetch latest data
+        # 1. Fetch Price Data & Run ML Prediction
         X, _ = self.prepare_data(symbol, period="3mo")
         if X is None or len(X) == 0: return None
         
@@ -74,10 +77,22 @@ class VolatilityPredictor:
         regime = "HIGH VOLATILITY" if prob > 0.4 else "QUIET / RANGE-BOUND"
         strategy = "LONG STRADDLE/STRANGLE" if prob > 0.4 else "IRON CONDOR / CREDIT SPREAD"
         
+        # 2. Fetch Extra Features (Sentiment, Fundamentals, Options)
+        sent_score, sent_label, headlines = self.sentiment_engine.get_sentiment(symbol)
+        fundamentals = get_fundamentals(symbol)
+        options_data = get_option_chain_summary(symbol)
+        
         return {
             "Symbol": symbol,
             "Regime": regime,
             "Confidence": f"{max(prob, 1-prob)*100:.1f}%",
             "Strategy": strategy,
-            "Prob_High_Vol": prob
+            "Prob_High_Vol": prob,
+            "Sentiment": {
+                "Score": sent_score,
+                "Label": sent_label,
+                "Headlines": headlines
+            },
+            "Fundamentals": fundamentals,
+            "Options": options_data
         }

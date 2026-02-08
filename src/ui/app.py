@@ -2,8 +2,15 @@ import streamlit as st
 import pandas as pd
 from src.pipeline.predictor import VolatilityPredictor
 from src.utils.stock_lists import ALL_STOCKS
+from src.utils.alerts import send_telegram_alert
 
 st.set_page_config(page_title="NIFTY Options AI", layout="wide")
+
+st.sidebar.title("⚙️ Settings")
+st.sidebar.markdown("### Telegram Alerts")
+tg_token = st.sidebar.text_input("Bot Token", type="password")
+tg_chat_id = st.sidebar.text_input("Chat ID")
+send_alerts = st.sidebar.checkbox("Enable Alerts")
 
 st.title("🤖 NIFTY50 Options AI Strategy Engine")
 st.markdown("Use Machine Learning to detect **Volatility Regimes** and suggest Option Strategies.")
@@ -19,7 +26,7 @@ def get_predictor():
 
 predictor = get_predictor()
 
-col1, col2 = st.columns([1, 2])
+col1, col2 = st.columns([1, 1])
 
 with col1:
     st.header("Analyze Stock")
@@ -37,13 +44,60 @@ with col1:
             if result:
                 st.success("Analysis Complete")
                 
-                # Display Card
-                st.metric("Detected Regime", result["Regime"], delta=result["Confidence"])
+                # --- Main ML Prediction ---
+                st.subheader("🤖 AI Prediction")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Regime", result["Regime"])
+                m2.metric("Confidence", result["Confidence"])
+                m3.metric("Prob > 1.5% Move", f"{result['Prob_High_Vol']:.2f}")
                 
-                st.subheader("Recommended Strategy")
-                st.info(f"**{result['Strategy']}**")
+                st.info(f"**Recommended Strategy:** {result['Strategy']}")
                 
-                st.write(f"Probability of Big Move (>1.5%): **{result['Prob_High_Vol']:.2f}**")
+                # --- Sentiment Analysis ---
+                st.markdown("---")
+                st.subheader("📰 Sentiment Analysis (News)")
+                sent = result["Sentiment"]
+                s1, s2 = st.columns([1, 3])
+                s1.metric("Sentiment", sent["Label"], f"{sent['Score']:.2f}")
+                with s2:
+                    if sent["Headlines"]:
+                        with st.expander("Recent Headlines"):
+                            for h in sent["Headlines"]:
+                                st.write(f"- {h}")
+                    else:
+                        st.caption("No recent news found.")
+
+                # --- Option Chain ---
+                st.markdown("---")
+                st.subheader("⛓️ Option Chain Data")
+                opt = result["Options"]
+                if opt:
+                    o1, o2, o3 = st.columns(3)
+                    o1.metric("PCR (OI)", opt["PCR_OI"])
+                    o2.metric("Max Pain", opt["Max_Pain"])
+                    o3.metric("Expiry", opt["Expiry"])
+                else:
+                    st.warning("Option Chain data unavailable (Market Closed/No Data).")
+                    
+                # --- Fundamentals ---
+                st.markdown("---")
+                st.subheader("📊 Fundamentals")
+                fun = result["Fundamentals"]
+                if fun:
+                    f1, f2, f3, f4 = st.columns(4)
+                    f1.metric("P/E Ratio", fun.get("PE_Ratio", "N/A"))
+                    f2.metric("Mkt Cap (Cr)", fun.get("Market_Cap_Cr", "N/A"))
+                    f3.metric("Div Yield", f"{fun.get('Dividend_Yield', 0)}%")
+                    f4.metric("Sector", fun.get("Sector", "N/A"))
+                
+                # --- Alerts ---
+                if send_alerts and "HIGH" in result["Regime"]:
+                    msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nConf: {result['Confidence']}\nStrategy: {result['Strategy']}"
+                    if send_telegram_alert(tg_token, tg_chat_id, msg):
+                        st.toast("Alert Sent to Telegram!", icon="✅")
+                    else:
+                        st.toast("Failed to send alert.", icon="❌")
+                        
             else:
                 st.error("Failed to fetch data.")
 
@@ -65,7 +119,16 @@ with col2:
             status_text.text(f"Scanning {stock}...")
             res = predictor.predict(stock)
             if res:
-                results.append(res)
+                # Flatten for table
+                row = {
+                    "Symbol": res["Symbol"],
+                    "Regime": res["Regime"],
+                    "Conf": res["Confidence"],
+                    "Sentiment": res["Sentiment"]["Label"],
+                    "PCR": res["Options"]["PCR_OI"] if res["Options"] else 0,
+                    "PE": res["Fundamentals"].get("PE_Ratio", 0) if res["Fundamentals"] else 0
+                }
+                results.append(row)
             progress.progress((i + 1) / len(watchlist))
             
         status_text.text("Scan Complete!")
