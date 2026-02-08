@@ -68,7 +68,12 @@ class VolatilityPredictor:
         if not options_data:
             return {}
             
-        atm_strike = round(spot_price / 50) * 50 # Nearest 50
+        # Determine Strike Width based on Index vs Stock
+        # NIFTY/BANKNIFTY usually 50/100 intervals
+        is_index = spot_price > 20000 
+        interval = 100 if is_index else 50
+        
+        atm_strike = round(spot_price / interval) * interval
         expiry = options_data.get("Expiry", "N/A")
         
         suggestions = {}
@@ -84,13 +89,19 @@ class VolatilityPredictor:
             
         elif "IRON CONDOR" in strategy:
             # Iron Condor: Sell OTM, Buy farther OTM for protection
-            # Short Strikes (Inner Wings) ~ 3% away
-            short_ce = round((spot_price * 1.03) / 50) * 50
-            short_pe = round((spot_price * 0.97) / 50) * 50
+            # Indexes move less in % terms than stocks, so tighten the wings for indexes
+            short_pct = 1.015 if is_index else 1.03
+            long_pct = 1.025 if is_index else 1.05
+            short_pct_down = 0.985 if is_index else 0.97
+            long_pct_down = 0.975 if is_index else 0.95
             
-            # Long Strikes (Outer Protection) ~ 5% away
-            long_ce = round((spot_price * 1.05) / 50) * 50
-            long_pe = round((spot_price * 0.95) / 50) * 50
+            # Short Strikes (Inner Wings)
+            short_ce = round((spot_price * short_pct) / interval) * interval
+            short_pe = round((spot_price * short_pct_down) / interval) * interval
+            
+            # Long Strikes (Outer Protection)
+            long_ce = round((spot_price * long_pct) / interval) * interval
+            long_pe = round((spot_price * long_pct_down) / interval) * interval
             
             suggestions = {
                 "Sell Call (Short)": f"{short_ce} CE",

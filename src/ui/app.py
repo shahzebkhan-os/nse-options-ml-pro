@@ -36,9 +36,9 @@ with st.sidebar:
     st.title("⚙️ Control Panel")
     
     st.subheader("Market Scope")
-    category = "Large Cap (Nifty 50)" # Fixed based on backtest
-    stock_list = ALL_STOCKS[category]
-    st.info(f"Active List: {category}\n(Top {len(stock_list)} Stocks)")
+    # Merge Indices + Large Cap for the dropdown
+    combined_list = ALL_STOCKS["Indices (NIFTY/BANKNIFTY/SENSEX)"] + ALL_STOCKS["Large Cap (Nifty 50 Stocks)"]
+    st.info(f"Active Universe: {len(combined_list)} Assets\n(Indices + NIFTY 50)")
 
     st.markdown("---")
     st.subheader("📡 Watchlist Scanner")
@@ -67,11 +67,11 @@ st.markdown(f"**AI-Powered Volatility Regime Detection & Strategy Generator** | 
 # --- Stock Selector Row ---
 col_sel1, col_sel2 = st.columns([1, 4])
 with col_sel1:
-    symbol = st.selectbox("Select Stock", stock_list, index=0)
+    symbol = st.selectbox("Select Asset", combined_list, index=0)
 with col_sel2:
     st.write("") # Spacer
     st.write("") 
-    run_analysis = st.button("🔍 Analyze Stock", type="primary")
+    run_analysis = st.button("🔍 Analyze Asset", type="primary")
 
 # --- Main Logic ---
 
@@ -84,7 +84,7 @@ if run_scan:
     progress = st.progress(0)
     status_text = st.empty()
     
-    watchlist = stock_list[:scan_limit]
+    watchlist = combined_list[:scan_limit]
     
     for i, stock in enumerate(watchlist):
         status_text.caption(f"Scanning {stock} ({i+1}/{len(watchlist)})...")
