@@ -3,6 +3,9 @@ import pandas as pd
 from src.pipeline.predictor import VolatilityPredictor
 from src.utils.stock_lists import ALL_STOCKS
 from src.utils.alerts import send_telegram_alert
+from src.ui.charts import plot_interactive_chart
+from src.ui.payoff import plot_payoff_diagram
+from src.features.indicators import compute_indicators
 
 st.set_page_config(page_title="NIFTY Options AI", layout="wide")
 
@@ -37,12 +40,6 @@ with col1:
     
     symbol = st.selectbox("Select Symbol", stock_list)
     
-from src.ui.charts import plot_interactive_chart
-from src.ui.payoff import plot_payoff_diagram
-from src.features.indicators import compute_indicators
-
-# ... (Previous imports)
-
     if st.button("Run Analysis"):
         with st.spinner(f"Analyzing {symbol}..."):
             result = predictor.predict(symbol)
@@ -121,8 +118,6 @@ from src.features.indicators import compute_indicators
                     msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
                     if send_telegram_alert(tg_token, tg_chat_id, msg):
                         st.toast("Alert Sent to Telegram!", icon="✅")
-
-                        
             else:
                 st.error("Failed to fetch data.")
 
