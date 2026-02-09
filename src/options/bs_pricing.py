@@ -1,6 +1,29 @@
 import numpy as np
 from scipy.stats import norm
 
+def black_scholes(S, K, T, r, sigma, option_type="call"):
+    """
+    Computes the Black-Scholes price for a call or put option.
+    S: Spot price
+    K: Strike price
+    T: Time to maturity (in years)
+    r: Risk-free rate
+    sigma: Volatility (decimal)
+    option_type: "call" or "put"
+    """
+    try:
+        d1 = (np.log(S/K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        if option_type == "call":
+            price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+        else:
+            price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+            
+        return price
+    except Exception:
+        return 0.0
+
 class BSModel:
     @staticmethod
     def d1(S, K, T, r, sigma):
