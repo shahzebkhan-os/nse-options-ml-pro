@@ -27,14 +27,25 @@ def get_fundamentals(symbol):
         return {}
 
 def get_option_chain_summary(symbol):
-    ticker_name = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+    # Handle Indices vs Stocks naming for Yahoo
+    if symbol.startswith("^"):
+        ticker_name = symbol
+    else:
+        ticker_name = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+        
     try:
         t = yf.Ticker(ticker_name)
         
         # Get nearest expiry
         expirations = t.options
         if not expirations:
-            return None
+            # Fallback: Try removing/adding .NS if failed
+            alt_name = symbol if ticker_name.endswith(".NS") else f"{symbol}.NS"
+            t = yf.Ticker(alt_name)
+            expirations = t.options
+            
+            if not expirations:
+                return None
             
         expiry = expirations[0]
         chain = t.option_chain(expiry)
@@ -48,16 +59,19 @@ def get_option_chain_summary(symbol):
         pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 0
         
         # Calculate Max Pain
-        # Max Pain is the strike where option writers lose the least money
         strikes = set(calls['strike']).union(set(puts['strike']))
+        if not strikes:
+            return None
+            
+        # Optimization: Filter strikes near spot price to speed up Max Pain calc
+        # Get approx price from options mean if live price unavailable
+        avg_strike = np.mean(list(strikes))
+        relevant_strikes = [k for k in strikes if 0.8 * avg_strike < k < 1.2 * avg_strike]
+        
         min_loss = float('inf')
         max_pain_strike = 0
         
-        for k in strikes:
-            # Valuation at expiration K
-            # Call value = max(0, Price - Strike)
-            # Put value = max(0, Strike - Price)
-            
+        for k in relevant_strikes:
             call_loss = calls.apply(lambda x: max(0, k - x['strike']) * x['openInterest'], axis=1).sum()
             put_loss = puts.apply(lambda x: max(0, x['strike'] - k) * x['openInterest'], axis=1).sum()
             
@@ -70,8 +84,8 @@ def get_option_chain_summary(symbol):
             "PCR_OI": pcr,
             "Max_Pain": max_pain_strike,
             "Expiry": expiry,
-            "Call_OI_Change": calls['change'].sum(), # Proxy for buildup
-            "Put_OI_Change": puts['change'].sum()
+            "Call_OI_Change": calls.get('change', pd.Series()).sum(),
+            "Put_OI_Change": puts.get('change', pd.Series()).sum()
         }
         
     except Exception as e:
