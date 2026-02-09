@@ -65,16 +65,20 @@ class VolatilityPredictor:
 
     def suggest_strikes(self, spot_price, strategy, options_data):
         """Generates specific Strike Prices for the suggested strategy."""
-        if not options_data:
+        # Fallback for Index/Interval logic if no options data
+        # Even without expiry date, we can suggest strikes based on spot price.
+        
+        if spot_price <= 0:
             return {}
             
         # Determine Strike Width based on Index vs Stock
-        # NIFTY/BANKNIFTY usually 50/100 intervals
         is_index = spot_price > 20000 
         interval = 100 if is_index else 50
         
         atm_strike = round(spot_price / interval) * interval
-        expiry = options_data.get("Expiry", "N/A")
+        
+        # Get expiry if available, else generic
+        expiry = options_data.get("Expiry", "Nearest Weekly") if options_data else "Nearest Weekly"
         
         suggestions = {}
         
