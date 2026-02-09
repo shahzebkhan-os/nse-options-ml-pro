@@ -223,6 +223,10 @@ else:
     
     # Reset force flag
     st.session_state['force_display'] = False
+    
+    # Ensure result is defined before using it
+    if 'result' not in locals() and 'result' not in globals():
+        result = None
         
     if result:
         # --- Signal Card ---
