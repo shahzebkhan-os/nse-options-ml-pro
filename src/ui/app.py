@@ -201,13 +201,32 @@ if run_analysis or st.session_state.get('force_display', False):
                 # --- Trade Setup Card ---
                 setup = result.get("Trade_Setup", {})
                 if setup:
-                    st.markdown("#### 🎯 Execution Plan")
-                    # Create a nice grid for the strikes
-                    cols = st.columns(len(setup)-1) # -1 to exclude 'Note'
-                    for i, (key, value) in enumerate(setup.items()):
-                        if key != "Note":
-                            cols[i % len(cols)].metric(key, value)
-                    st.caption(f"📝 *Note: {setup.get('Note', '')}*")
+                    st.markdown("---")
+                    st.subheader("🎯 Simple Execution Plan")
+                    
+                    expiry = setup.get("Ideal Expiry", "Next Weekly")
+                    note = setup.get("Note", "")
+                    
+                    # Logic for Iron Condor / Credit Spreads
+                    if "CONDOR" in result['Strategy'] or "SPREAD" in result['Strategy']:
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown("🔴 **SELL** (Income Leg)")
+                            st.code(f"{setup.get('Sell Call (Short)', '-')}\n{setup.get('Sell Put (Short)', '-')}", language="text")
+                        with c2:
+                            st.markdown("🟢 **BUY** (Safety Leg)")
+                            st.code(f"{setup.get('Buy Call (Hedge)', '-')}\n{setup.get('Buy Put (Hedge)', '-')}", language="text")
+                            
+                    # Logic for Straddles / Strangles
+                    elif "STRADDLE" in result['Strategy'] or "STRANGLE" in result['Strategy']:
+                        st.markdown("🔵 **BUY** (Long Volatility)")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.code(f"{setup.get('Leg 1 (Buy CE)', '-')}", language="text")
+                        with c2:
+                            st.code(f"{setup.get('Leg 2 (Buy PE)', '-')}", language="text")
+                    
+                    st.caption(f"📅 **Expiry:** {expiry} | 💡 *{note}*")
             
             with v_col2:
                 # Mini Sentiment
