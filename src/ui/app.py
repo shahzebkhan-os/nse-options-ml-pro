@@ -237,127 +237,127 @@ else:
             m3.metric("Big Move Prob", f"{result['Prob_High_Vol']:.2f}", help="Probability of >1.5% move tomorrow")
             m4.metric("PCR (OI)", result["Options"]["PCR_OI"] if result["Options"] else "N/A", help="Put-Call Ratio (>1.2 Bullish, <0.6 Bearish)")
 
-                # The Verdict
-                st.divider()
-                v_col1, v_col2 = st.columns([2, 1])
-                
-                with v_col1:
-                    st.subheader(f"{color_emoji} {result['Regime']}")
-                    st.caption("AI Detected Market Condition")
-                    
-                    if is_high_vol:
-                        st.error(f"Strategy: **{result['Strategy']}**")
-                        st.markdown("*Expect significant price movement. Buy Volatility.*")
-                    else:
-                        st.success(f"Strategy: **{result['Strategy']}**")
-                        st.markdown("*Expect range-bound action. Sell Volatility / Eat Theta.*")
-                    
-                    # --- Trade Setup Card ---
-                    setup = result.get("Trade_Setup", {})
-                    if setup:
-                        st.markdown("---")
-                        st.subheader("🎯 Simple Execution Plan")
-                        
-                        expiry = setup.get("Ideal Expiry", "Next Weekly")
-                        note = setup.get("Note", "")
-                        
-                        # Logic for Iron Condor / Credit Spreads
-                        if "CONDOR" in result['Strategy'] or "SPREAD" in result['Strategy']:
-                            col_sell, col_buy = st.columns(2)
-                            with col_sell:
-                                st.markdown("🔴 **SELL** (Income Leg)")
-                                st.code(f"{setup.get('Sell Call (Short)', '-')}\n{setup.get('Sell Put (Short)', '-')}", language="text")
-                            with col_buy:
-                                st.markdown("🟢 **BUY** (Safety Leg)")
-                                st.code(f"{setup.get('Buy Call (Hedge)', '-')}\n{setup.get('Buy Put (Hedge)', '-')}", language="text")
-                                
-                        # Logic for Straddles / Strangles
-                        elif "STRADDLE" in result['Strategy'] or "STRANGLE" in result['Strategy']:
-                            st.markdown("🔵 **BUY** (Long Volatility)")
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.code(f"{setup.get('Leg 1 (Buy CE)', '-')}", language="text")
-                            with c2:
-                                st.code(f"{setup.get('Leg 2 (Buy PE)', '-')}", language="text")
-                        
-                        st.caption(f"📅 **Expiry:** {expiry} | 💡 *{note}*")
-                
-                with v_col2:
-                    # Mini Sentiment
-                    sent = result["Sentiment"]
-                    s_color = "green" if sent["Label"] == "BULLISH" else "red" if sent["Label"] == "BEARISH" else "gray"
-                    st.markdown(f"**News Sentiment:** :{s_color}[{sent['Label']}]")
-                    st.progress((sent['Score'] + 1) / 2) # Normalize -1..1 to 0..1
-
-            # --- Visualizations ---
+            # The Verdict
             st.divider()
-            tab_chart, tab_payoff, tab_backtest, tab_fund = st.tabs(["📈 Technical Chart", "💰 Payoff Diagram", "🧪 Strategy Backtest", "📊 Deep Dive"])
+            v_col1, v_col2 = st.columns([2, 1])
             
-            with tab_chart:
-                df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
-                df_chart = compute_indicators(df_chart)
-                fig_chart = plot_interactive_chart(df_chart, symbol)
-                st.plotly_chart(fig_chart, use_container_width=True)
+            with v_col1:
+                st.subheader(f"{color_emoji} {result['Regime']}")
+                st.caption("AI Detected Market Condition")
                 
-            with tab_payoff:
-                fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
-                st.plotly_chart(fig_payoff, use_container_width=True)
-                st.info(desc)
-                
-            with tab_backtest:
-                st.markdown(f"### 🧪 Historical Performance: {symbol}")
-                st.caption("Simulating AI Strategy (Iron Condor vs Straddle) over the last 1 year.")
-                
-                if st.button("Run Backtest Simulation"):
-                    with st.spinner("Simulating trades..."):
-                        trades_df, equity_curve = backtester.simulate_strategy(symbol, period="1y")
-                        
-                        if trades_df is not None and not trades_df.empty:
-                            # KPI Cards
-                            total_pnl = trades_df['PnL'].sum()
-                            win_rate = len(trades_df[trades_df['PnL'] > 0]) / len(trades_df) * 100
-                            num_trades = len(trades_df)
-                            
-                            k1, k2, k3 = st.columns(3)
-                            k1.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=f"{(total_pnl/100000)*100:.1f}% Return")
-                            k2.metric("Win Rate", f"{win_rate:.1f}%")
-                            k3.metric("Trades Executed", num_trades)
-                            
-                            # Growth Chart
-                            st.subheader("Equity Curve (Start: ₹1L)")
-                            st.line_chart(trades_df.set_index("Date")["Equity"])
-                            
-                            # Trade Log
-                            with st.expander("View Trade Log"):
-                                st.dataframe(trades_df)
-                        else:
-                            st.warning("Not enough data to backtest.")
+                if is_high_vol:
+                    st.error(f"Strategy: **{result['Strategy']}**")
+                    st.markdown("*Expect significant price movement. Buy Volatility.*")
                 else:
-                    st.info("Click the button to simulate strategy performance.")
+                    st.success(f"Strategy: **{result['Strategy']}**")
+                    st.markdown("*Expect range-bound action. Sell Volatility / Eat Theta.*")
                 
-            with tab_fund:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("### Fundamentals")
-                    fun = result["Fundamentals"]
-                    if fun:
-                        st.json(fun)
-                    else:
-                        st.write("No data.")
-                with c2:
-                    st.markdown("### Option Chain Stats")
-                    opt = result["Options"]
-                    if opt:
-                        st.write(f"**Max Pain:** {opt['Max_Pain']}")
-                        st.write(f"**Call OI Chg:** {opt['Call_OI_Change']}")
-                        st.write(f"**Put OI Chg:** {opt['Put_OI_Change']}")
-                    else:
-                        st.write("No Option Chain data.")
+                # --- Trade Setup Card ---
+                setup = result.get("Trade_Setup", {})
+                if setup:
+                    st.markdown("---")
+                    st.subheader("🎯 Simple Execution Plan")
+                    
+                    expiry = setup.get("Ideal Expiry", "Next Weekly")
+                    note = setup.get("Note", "")
+                    
+                    # Logic for Iron Condor / Credit Spreads
+                    if "CONDOR" in result['Strategy'] or "SPREAD" in result['Strategy']:
+                        col_sell, col_buy = st.columns(2)
+                        with col_sell:
+                            st.markdown("🔴 **SELL** (Income Leg)")
+                            st.code(f"{setup.get('Sell Call (Short)', '-')}\n{setup.get('Sell Put (Short)', '-')}", language="text")
+                        with col_buy:
+                            st.markdown("🟢 **BUY** (Safety Leg)")
+                            st.code(f"{setup.get('Buy Call (Hedge)', '-')}\n{setup.get('Buy Put (Hedge)', '-')}", language="text")
+                            
+                    # Logic for Straddles / Strangles
+                    elif "STRADDLE" in result['Strategy'] or "STRANGLE" in result['Strategy']:
+                        st.markdown("🔵 **BUY** (Long Volatility)")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.code(f"{setup.get('Leg 1 (Buy CE)', '-')}", language="text")
+                        with c2:
+                            st.code(f"{setup.get('Leg 2 (Buy PE)', '-')}", language="text")
+                    
+                    st.caption(f"📅 **Expiry:** {expiry} | 💡 *{note}*")
+            
+            with v_col2:
+                # Mini Sentiment
+                sent = result["Sentiment"]
+                s_color = "green" if sent["Label"] == "BULLISH" else "red" if sent["Label"] == "BEARISH" else "gray"
+                st.markdown(f"**News Sentiment:** :{s_color}[{sent['Label']}]")
+                st.progress((sent['Score'] + 1) / 2) # Normalize -1..1 to 0..1
 
-            # --- Alerts Trigger ---
-            if send_alerts and is_high_vol:
-                msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
-                send_telegram_alert(tg_token, tg_chat_id, msg)
+        # --- Visualizations ---
+        st.divider()
+        tab_chart, tab_payoff, tab_backtest, tab_fund = st.tabs(["📈 Technical Chart", "💰 Payoff Diagram", "🧪 Strategy Backtest", "📊 Deep Dive"])
+        
+        with tab_chart:
+            df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
+            df_chart = compute_indicators(df_chart)
+            fig_chart = plot_interactive_chart(df_chart, symbol)
+            st.plotly_chart(fig_chart, use_container_width=True)
+            
+        with tab_payoff:
+            fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
+            st.plotly_chart(fig_payoff, use_container_width=True)
+            st.info(desc)
+            
+        with tab_backtest:
+            st.markdown(f"### 🧪 Historical Performance: {symbol}")
+            st.caption("Simulating AI Strategy (Iron Condor vs Straddle) over the last 1 year.")
+            
+            if st.button("Run Backtest Simulation"):
+                with st.spinner("Simulating trades..."):
+                    trades_df, equity_curve = backtester.simulate_strategy(symbol, period="1y")
+                    
+                    if trades_df is not None and not trades_df.empty:
+                        # KPI Cards
+                        total_pnl = trades_df['PnL'].sum()
+                        win_rate = len(trades_df[trades_df['PnL'] > 0]) / len(trades_df) * 100
+                        num_trades = len(trades_df)
+                        
+                        k1, k2, k3 = st.columns(3)
+                        k1.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=f"{(total_pnl/100000)*100:.1f}% Return")
+                        k2.metric("Win Rate", f"{win_rate:.1f}%")
+                        k3.metric("Trades Executed", num_trades)
+                        
+                        # Growth Chart
+                        st.subheader("Equity Curve (Start: ₹1L)")
+                        st.line_chart(trades_df.set_index("Date")["Equity"])
+                        
+                        # Trade Log
+                        with st.expander("View Trade Log"):
+                            st.dataframe(trades_df)
+                    else:
+                        st.warning("Not enough data to backtest.")
+            else:
+                st.info("Click the button to simulate strategy performance.")
+            
+        with tab_fund:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### Fundamentals")
+                fun = result["Fundamentals"]
+                if fun:
+                    st.json(fun)
+                else:
+                    st.write("No data.")
+            with c2:
+                st.markdown("### Option Chain Stats")
+                opt = result["Options"]
+                if opt:
+                    st.write(f"**Max Pain:** {opt['Max_Pain']}")
+                    st.write(f"**Call OI Chg:** {opt['Call_OI_Change']}")
+                    st.write(f"**Put OI Chg:** {opt['Put_OI_Change']}")
+                else:
+                    st.write("No Option Chain data.")
 
-        else:
-            st.error("Could not fetch data for this symbol.")
+        # --- Alerts Trigger ---
+        if send_alerts and is_high_vol:
+            msg = f"🚨 *High Volatility Detected!* \nSymbol: {symbol}\nPrice: {result['Live_Price']}\nStrategy: {result['Strategy']}"
+            send_telegram_alert(tg_token, tg_chat_id, msg)
+
+    else:
+        st.error("Could not fetch data for this symbol.")
