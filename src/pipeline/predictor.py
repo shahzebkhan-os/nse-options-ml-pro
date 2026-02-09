@@ -169,3 +169,58 @@ class VolatilityPredictor:
             }
             
         return suggestions
+
+    def predict(self, symbol):
+        if not self.is_trained:
+            # First time load: Train all sector models
+            self.train_sector_models() 
+            self.is_trained = True
+            
+        # Select appropriate model
+        sector = self.get_sector(symbol)
+        model = self.sector_models.get(sector, self.sector_models.get("GENERIC"))
+        
+        if not model:
+            return None 
+            
+        # 1. Fetch Price Data & Run ML Prediction
+        X, _ = self.prepare_data(symbol, period="3mo")
+        if X is None or len(X) == 0: return None
+        
+        latest = X.iloc[[-1]]
+        prob = model.predict_proba(latest)[0][1] # Prob of High Vol
+        
+        # Get VIX from latest row for pricing
+        current_vix = latest['Vix_Level'].values[0] if 'Vix_Level' in latest else 15.0
+        
+        regime = "HIGH VOLATILITY" if prob > 0.4 else "QUIET / RANGE-BOUND"
+        strategy = "LONG STRADDLE/STRANGLE" if prob > 0.4 else "IRON CONDOR / CREDIT SPREAD"
+        
+        # 2. Fetch Extra Features
+        sent_score, sent_label, headlines = self.sentiment_engine.get_sentiment(symbol)
+        fundamentals = get_fundamentals(symbol)
+        options_data = get_option_chain_summary(symbol)
+        live_price, change, pct_change = self.connector.get_live_price(symbol)
+        
+        # 3. Generate Specific Strike Suggestions
+        trade_setup = self.suggest_strikes(live_price, strategy, options_data, vix=current_vix)
+        
+        return {
+            "Symbol": symbol,
+            "Regime": regime,
+            "Confidence": f"{max(prob, 1-prob)*100:.1f}%",
+            "Strategy": strategy,
+            "Prob_High_Vol": prob,
+            "Live_Price": live_price,
+            "Price_Change": change,
+            "Pct_Change": pct_change,
+            "Sector_Model": sector, # Info for UI
+            "Sentiment": {
+                "Score": sent_score,
+                "Label": sent_label,
+                "Headlines": headlines
+            },
+            "Fundamentals": fundamentals,
+            "Options": options_data,
+            "Trade_Setup": trade_setup
+        }
