@@ -57,7 +57,8 @@ with st.sidebar:
 @st.cache_resource
 def get_predictor():
     pred = VolatilityPredictor()
-    pred.train("RELIANCE") 
+    # We delay training until necessary, or handle it inside predict()
+    # Removing direct .train() call here to avoid startup timeout/errors
     return pred
 
 @st.cache_resource
