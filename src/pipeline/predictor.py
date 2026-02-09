@@ -9,16 +9,77 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+import warnings
+warnings.filterwarnings('ignore')
 
 logger = get_logger(__name__)
 
 class VolatilityPredictor:
     def __init__(self):
-        self.model = RandomForestClassifier(n_estimators=200, max_depth=5, 
-                                          class_weight='balanced', random_state=42)
+        self.volatility_model = RandomForestClassifier(n_estimators=200, max_depth=5, 
+                                                      class_weight='balanced', random_state=42)
+        self.directional_model = LogisticRegression(random_state=42, max_iter=1000)
         self.connector = DataConnector()
         self.sentiment_engine = SentimentEngine()
         self.is_trained = False
+        self.sector_models = {}
+        self.directional_sector_models = {}
+
+    def prepare_directional_data(self, symbol, period="2y"):
+        df = self.connector.fetch_ohlcv(symbol, period=period)
+        if df is None or df.empty: return None, None
+        
+        # Market Context
+        nifty = self.connector.fetch_ohlcv("^NSEI", period=period)
+        vix = self.connector.fetch_ohlcv("^INDIAVIX", period=period)
+        
+        if nifty is not None:
+            nifty_ret = np.log(nifty['Close']).diff()
+            df['Nifty_Lag1'] = nifty_ret.shift(1)
+        else:
+            df['Nifty_Lag1'] = 0
+            
+        if vix is not None:
+            df['Vix_Level'] = vix['Close'].shift(1)
+        else:
+            df['Vix_Level'] = 15 # Default VIX
+            
+        # Features
+        df = compute_indicators(df)
+        df['Log_Return'] = np.log(df['Close']).diff()
+        df['Lag1'] = df['Log_Return'].shift(1)
+        df['Lag2'] = df['Log_Return'].shift(2)
+        df['Lag3'] = df['Log_Return'].shift(3)
+        df['Lag5'] = df['Log_Return'].shift(5)
+        
+        # Multi-horizon targets
+        df['Target_1d'] = np.where(np.log(df['Close']).diff().shift(-1) > 0, 1, 0)  # 1 day
+        df['Target_3d'] = np.where(np.log(df['Close']).diff(periods=3).shift(-3) > 0, 1, 0)  # 3 day
+        df['Target_5d'] = np.where(np.log(df['Close']).diff(periods=5).shift(-5) > 0, 1, 0)  # 5 day
+        df['Target_15d'] = np.where(np.log(df['Close']).diff(periods=15).shift(-15) > 0, 1, 0)  # 15 day
+        df['Target_1m'] = np.where(np.log(df['Close']).diff(periods=22).shift(-22) > 0, 1, 0)  # 1 month (~22 trading days)
+        df['Target_3m'] = np.where(np.log(df['Close']).diff(periods=66).shift(-66) > 0, 1, 0)  # 3 months
+        df['Target_6m'] = np.where(np.log(df['Close']).diff(periods=132).shift(-132) > 0, 1, 0)  # 6 months
+        df['Target_1y'] = np.where(np.log(df['Close']).diff(periods=264).shift(-264) > 0, 1, 0)  # 1 year
+        
+        feature_cols = ['RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 'ATR', 'ATR_Percent', 
+                       'BB_Width', 'BB_Position', 'Stoch_K', 'Stoch_D', 'Log_Return', 
+                       'Lag1', 'Lag2', 'Lag3', 'Lag5', 'Nifty_Lag1', 'Vix_Level',
+                       'Volume_MA_Ratio', 'Price_Volume_Trend', 'OBV']
+        
+        df = df.dropna()
+        
+        return df[feature_cols], {
+            'Target_1d': df['Target_1d'],
+            'Target_3d': df['Target_3d'],
+            'Target_5d': df['Target_5d'],
+            'Target_15d': df['Target_15d'],
+            'Target_1m': df['Target_1m'],
+            'Target_3m': df['Target_3m'],
+            'Target_6m': df['Target_6m'],
+            'Target_1y': df['Target_1y']
+        }
 
     def prepare_data(self, symbol, period="2y"):
         df = self.connector.fetch_ohlcv(symbol, period=period)
@@ -52,6 +113,51 @@ class VolatilityPredictor:
         df = df.dropna()
         
         return df[feature_cols], df['Target']
+
+    def train_directional_sector_models(self):
+        """Trains directional prediction models for different sectors."""
+        sectors = {
+            "BANK": ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "^NSEBANK"],
+            "IT": ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM"],
+            "ENERGY": ["RELIANCE", "ONGC", "NTPC", "POWERGRID", "BPCL"],
+            "AUTO": ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO"],
+            "GENERIC": ["^NSEI", "^BSESN", "ITC", "LT", "TITAN"]
+        }
+        
+        self.directional_sector_models = {}
+        
+        for sector, stocks in sectors.items():
+            logger.info(f"Training Directional {sector} Model...")
+            # Aggregate data from multiple stocks in the sector to build a robust model
+            X_all, y_all = [], []
+            
+            for symbol in stocks:
+                try:
+                    X, y_dict = self.prepare_directional_data(symbol)
+                    if X is not None and not X.empty:
+                        # Combine all targets for training
+                        y_combined = pd.DataFrame(y_dict)
+                        X_repeated = pd.concat([X] * len(y_combined.columns), ignore_index=True)
+                        y_combined_flat = pd.concat([y_combined[col] for col in y_combined.columns], ignore_index=True)
+                        
+                        # Only use non-NaN values
+                        mask = ~y_combined_flat.isna()
+                        if mask.any():
+                            X_all.append(X_repeated[mask])
+                            y_all.append(y_combined_flat[mask])
+                except Exception as e:
+                    logger.warning(f"Skipping {symbol} for directional training: {e}")
+            
+            if X_all:
+                X_train = pd.concat(X_all)
+                y_train = pd.concat(y_all)
+                
+                model = LogisticRegression(random_state=42, max_iter=1000, class_weight='balanced')
+                model.fit(X_train, y_train.astype(int))
+                self.directional_sector_models[sector] = model
+                logger.info(f"✅ Directional {sector} Model Trained.")
+            else:
+                logger.warning(f"❌ Could not train Directional {sector} model.")
 
     def train_sector_models(self):
         """Trains specific models for different sectors."""
@@ -102,6 +208,42 @@ class VolatilityPredictor:
         if symbol in ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOT"]:
             return "AUTO"
         return "GENERIC"
+
+    def predict_direction(self, symbol, horizon="1d"):
+        """Predicts direction (up/down) for a given stock and timeframe."""
+        if not self.is_trained:
+            # Models should be trained by now, but just in case
+            self.train_sector_models()
+            self.train_directional_sector_models()
+            
+        # Select appropriate model
+        sector = self.get_sector(symbol)
+        model = self.directional_sector_models.get(sector, self.directional_sector_models.get("GENERIC"))
+        
+        if not model:
+            return None
+            
+        # Fetch data for prediction
+        X, _ = self.prepare_directional_data(symbol, period="3mo")
+        if X is None or len(X) == 0: return None
+        
+        latest = X.iloc[[-1]]
+        
+        # Get prediction probability
+        try:
+            prob = model.predict_proba(latest)[0][1]  # Probability of going UP
+            prediction = "UP" if prob > 0.5 else "DOWN"
+            confidence = max(prob, 1-prob) * 100
+            
+            return {
+                "direction": prediction,
+                "confidence": f"{confidence:.1f}%",
+                "probability_up": prob,
+                "horizon": horizon
+            }
+        except Exception as e:
+            logger.error(f"Error in directional prediction for {symbol}: {e}")
+            return None
 
     def suggest_strikes(self, spot_price, strategy, options_data=None, vix=15.0):
         """Generates specific Strike Prices for the suggested strategy with price lookups."""
@@ -174,6 +316,7 @@ class VolatilityPredictor:
         if not self.is_trained:
             # First time load: Train all sector models
             self.train_sector_models() 
+            self.train_directional_sector_models()
             self.is_trained = True
             
         # Select appropriate model
@@ -205,6 +348,19 @@ class VolatilityPredictor:
         # 3. Generate Specific Strike Suggestions
         trade_setup = self.suggest_strikes(live_price, strategy, options_data, vix=current_vix)
         
+        # 4. Get Directional Predictions for various horizons
+        directional_predictions = {}
+        horizons = ["1d", "3d", "5d", "15d", "1m", "3m", "6m", "1y"]
+        
+        for horizon in horizons:
+            try:
+                dir_pred = self.predict_direction(symbol, horizon)
+                if dir_pred:
+                    directional_predictions[horizon] = dir_pred
+            except Exception as e:
+                logger.warning(f"Could not get directional prediction for {symbol} {horizon}: {e}")
+                directional_predictions[horizon] = None
+        
         return {
             "Symbol": symbol,
             "Regime": regime,
@@ -222,5 +378,6 @@ class VolatilityPredictor:
             },
             "Fundamentals": fundamentals,
             "Options": options_data,
-            "Trade_Setup": trade_setup
+            "Trade_Setup": trade_setup,
+            "Directional_Predictions": directional_predictions
         }

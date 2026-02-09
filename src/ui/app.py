@@ -30,6 +30,12 @@ st.markdown("""
         font-size: 24px !important;
         font-weight: bold;
     }
+    .direction-up {
+        color: #22c55e !important;
+    }
+    .direction-down {
+        color: #ef4444 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -161,6 +167,8 @@ else:
                     "Regime": res["Regime"],
                     "Conf": res["Confidence"],
                     "PCR": res["Options"]["PCR_OI"] if res["Options"] else 0,
+                    "Dir 1D": res["Directional_Predictions"].get("1d", {}).get("direction", "N/A") if "Directional_Predictions" in res else "N/A",
+                    "Dir Conf 1D": res["Directional_Predictions"].get("1d", {}).get("confidence", "N/A") if "Directional_Predictions" in res else "N/A"
                 }
                 results.append(row)
             progress.progress((i + 1) / len(watchlist))
@@ -173,10 +181,20 @@ else:
             def highlight_regime(val):
                 color = 'red' if 'HIGH' in val else 'green'
                 return f'color: {color}; font-weight: bold'
+                
+            def highlight_direction(val):
+                if val == "UP":
+                    return 'color: #22c55e; font-weight: bold'
+                elif val == "DOWN":
+                    return 'color: #ef4444; font-weight: bold'
+                return ''
+
+            # Apply styles
+            styled_df = df.style.applymap(highlight_regime, subset=['Regime']).applymap(highlight_direction, subset=['Dir 1D'])
 
             # Interactive Table (Selection Mode)
             event = st.dataframe(
-                df.style.applymap(highlight_regime, subset=['Regime']),
+                styled_df,
                 use_container_width=True,
                 height=400,
                 selection_mode="single-row",
@@ -212,7 +230,7 @@ else:
         else:
             # Show "Training Models..." only on first run
             if not predictor.is_trained:
-                with st.spinner("🚀 Initializing Sector AI Models (Banking, IT, Energy)..."):
+                with st.spinner("🚀 Initializing Sector AI Models (Banking, IT, Energy, Directional)..."):
                     result = predictor.predict(symbol)
             else:
                 with st.spinner(f"Running AI Models on {symbol}..."):
@@ -293,6 +311,69 @@ else:
                 s_color = "green" if sent["Label"] == "BULLISH" else "red" if sent["Label"] == "BEARISH" else "gray"
                 st.markdown(f"**News Sentiment:** :{s_color}[{sent['Label']}]")
                 st.progress((sent['Score'] + 1) / 2) # Normalize -1..1 to 0..1
+                
+                # Directional Prediction Summary
+                if "Directional_Predictions" in result:
+                    dir_pred = result["Directional_Predictions"].get("1d")
+                    if dir_pred:
+                        dir_text = dir_pred["direction"]
+                        dir_conf = dir_pred["confidence"]
+                        dir_class = "direction-up" if dir_text == "UP" else "direction-down" 
+                        st.markdown(f"**Direction (1D):** <span class='{dir_class}'>{dir_text}</span> ({dir_conf})", unsafe_allow_html=True)
+
+        # --- Directional Predictions Section ---
+        if "Directional_Predictions" in result:
+            st.divider()
+            st.subheader("📈 Directional Predictions (Up/Down)")
+            st.caption("AI predictions for price direction across multiple timeframes")
+            
+            # Create a grid for different timeframes
+            horizons = ["1d", "3d", "5d", "15d", "1m", "3m", "6m", "1y"]
+            cols = st.columns(len(horizons))
+            
+            for i, horizon in enumerate(horizons):
+                with cols[i]:
+                    dir_pred = result["Directional_Predictions"].get(horizon)
+                    if dir_pred:
+                        direction = dir_pred["direction"]
+                        conf = dir_pred["confidence"]
+                        prob_up = dir_pred["probability_up"]
+                        
+                        # Color coding
+                        bg_color = "#22c55e" if direction == "UP" else "#ef4444" if direction == "DOWN" else "#6b7280"
+                        text_color = "white"
+                        
+                        st.markdown(f"""
+                        <div style="
+                            background-color: {bg_color};
+                            color: {text_color};
+                            padding: 10px;
+                            border-radius: 8px;
+                            text-align: center;
+                            margin-bottom: 10px;
+                        ">
+                            <div><strong>{horizon.upper()}</strong></div>
+                            <div style="font-size: 1.2em;">{direction}</div>
+                            <div style="font-size: 0.8em;">{conf}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Show probability bar
+                        st.progress(prob_up)
+                    else:
+                        st.markdown(f"""
+                        <div style="
+                            background-color: #374151;
+                            color: white;
+                            padding: 10px;
+                            border-radius: 8px;
+                            text-align: center;
+                            margin-bottom: 10px;
+                        ">
+                            <div><strong>{horizon.upper()}</strong></div>
+                            <div>N/A</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
         # --- Visualizations ---
         st.divider()
