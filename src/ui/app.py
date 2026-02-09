@@ -7,6 +7,7 @@ from src.ui.charts import plot_interactive_chart
 from src.ui.payoff import plot_payoff_diagram
 from src.features.indicators import compute_indicators
 from src.backtest.strategy_simulator import StrategyBacktester
+from src.pipeline.scanner import ParallelStockScanner
 import plotly.express as px
 
 # --- Configuration ---
@@ -153,33 +154,29 @@ else:
         
         watchlist = combined_list[:scan_limit]
         
-        for i, stock in enumerate(watchlist):
-            status_text.caption(f"Scanning {stock} ({i+1}/{len(watchlist)})...")
-            res = predictor.predict(stock)
-            if res:
-                # SAVE TO CACHE
-                st.session_state.analysis_cache[stock] = res
-                
-                row = {
-                    "Symbol": res["Symbol"],
-                    "Price": f"₹{res['Live_Price']:.2f}",
-                    "Change": f"{res['Pct_Change']:.2f}%",
-                    "Regime": res["Regime"],
-                    "Conf": res["Confidence"],
-                    "PCR": res["Options"]["PCR_OI"] if res["Options"] else 0,
-                    "Dir 1D": res["Directional_Predictions"].get("1d", {}).get("direction", "N/A") if "Directional_Predictions" in res else "N/A",
-                    "Dir Conf 1D": res["Directional_Predictions"].get("1d", {}).get("confidence", "N/A") if "Directional_Predictions" in res else "N/A"
-                }
-                results.append(row)
-            progress.progress((i + 1) / len(watchlist))
-            
+        # Use parallel scanner
+        scanner = ParallelStockScanner(max_workers=8)
+        
+        def update_progress(result, completed, total):
+            progress.progress(completed / total)
+            status_text.caption(f"Scanned {completed}/{total}: {result['Symbol']} - {result['Regime']}")
+        
+        # Perform parallel scan with real-time updates
+        results = scanner.scan_stocks(watchlist, callback=update_progress)
+        
         status_text.empty()
         if results:
-            df = pd.DataFrame(results)
+            # Extract only the display data (without raw_result)
+            display_results = []
+            for result in results:
+                display_result = {k: v for k, v in result.items() if k != 'raw_result'}
+                display_results.append(display_result)
+            
+            df = pd.DataFrame(display_results)
             
             # Color styling
             def highlight_regime(val):
-                color = 'red' if 'HIGH' in val else 'green'
+                color = 'red' if 'HIGH' in str(val) else 'green'
                 return f'color: {color}; font-weight: bold'
                 
             def highlight_direction(val):
@@ -315,11 +312,13 @@ else:
                 # Directional Prediction Summary
                 if "Directional_Predictions" in result:
                     dir_pred = result["Directional_Predictions"].get("1d")
-                    if dir_pred:
+                    if dir_pred and dir_pred.get("direction") != "N/A":
                         dir_text = dir_pred["direction"]
                         dir_conf = dir_pred["confidence"]
                         dir_class = "direction-up" if dir_text == "UP" else "direction-down" 
                         st.markdown(f"**Direction (1D):** <span class='{dir_class}'>{dir_text}</span> ({dir_conf})", unsafe_allow_html=True)
+                    else:
+                        st.markdown("**Direction (1D):** N/A")
 
         # --- Directional Predictions Section ---
         if "Directional_Predictions" in result:
@@ -334,7 +333,7 @@ else:
             for i, horizon in enumerate(horizons):
                 with cols[i]:
                     dir_pred = result["Directional_Predictions"].get(horizon)
-                    if dir_pred:
+                    if dir_pred and dir_pred.get("direction") != "N/A":
                         direction = dir_pred["direction"]
                         conf = dir_pred["confidence"]
                         prob_up = dir_pred["probability_up"]

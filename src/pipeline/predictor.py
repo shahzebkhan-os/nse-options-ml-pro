@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -17,16 +18,17 @@ logger = get_logger(__name__)
 
 class VolatilityPredictor:
     def __init__(self):
-        self.volatility_model = RandomForestClassifier(n_estimators=200, max_depth=5, 
-                                                      class_weight='balanced', random_state=42)
-        self.directional_model = LogisticRegression(random_state=42, max_iter=1000)
+        self.volatility_model = RandomForestClassifier(n_estimators=100, max_depth=5, 
+                                                      class_weight='balanced', random_state=42, n_jobs=-1)
+        self.directional_model = LogisticRegression(random_state=42, max_iter=500, n_jobs=-1)
         self.connector = DataConnector()
         self.sentiment_engine = SentimentEngine()
         self.is_trained = False
         self.sector_models = {}
         self.directional_sector_models = {}
+        self.scalers = {}  # Store scalers for each sector
 
-    def prepare_directional_data(self, symbol, period="2y"):
+    def prepare_directional_data(self, symbol, period="1y"):  # Reduced period for faster training
         df = self.connector.fetch_ohlcv(symbol, period=period)
         if df is None or df.empty: return None, None
         
@@ -45,7 +47,7 @@ class VolatilityPredictor:
         else:
             df['Vix_Level'] = 15 # Default VIX
             
-        # Features
+        # Features - simplified for faster computation
         df = compute_indicators(df)
         df['Log_Return'] = np.log(df['Close']).diff()
         df['Lag1'] = df['Log_Return'].shift(1)
@@ -63,10 +65,9 @@ class VolatilityPredictor:
         df['Target_6m'] = np.where(np.log(df['Close']).diff(periods=132).shift(-132) > 0, 1, 0)  # 6 months
         df['Target_1y'] = np.where(np.log(df['Close']).diff(periods=264).shift(-264) > 0, 1, 0)  # 1 year
         
-        feature_cols = ['RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 'ATR', 'ATR_Percent', 
-                       'BB_Width', 'BB_Position', 'Stoch_K', 'Stoch_D', 'Log_Return', 
-                       'Lag1', 'Lag2', 'Lag3', 'Lag5', 'Nifty_Lag1', 'Vix_Level',
-                       'Volume_MA_Ratio', 'Price_Volume_Trend', 'OBV']
+        # Reduced feature set for faster training
+        feature_cols = ['RSI', 'MACD', 'MACD_Signal', 'ATR', 'Log_Return', 
+                       'Lag1', 'Lag2', 'Lag3', 'Nifty_Lag1', 'Vix_Level']
         
         df = df.dropna()
         
@@ -81,7 +82,7 @@ class VolatilityPredictor:
             'Target_1y': df['Target_1y']
         }
 
-    def prepare_data(self, symbol, period="2y"):
+    def prepare_data(self, symbol, period="1y"):  # Reduced period for faster training
         df = self.connector.fetch_ohlcv(symbol, period=period)
         if df is None or df.empty: return None, None
         
@@ -100,7 +101,7 @@ class VolatilityPredictor:
         else:
             df['Vix_Level'] = 15 # Default VIX
             
-        # Features
+        # Features - simplified for faster computation
         df = compute_indicators(df)
         df['Log_Return'] = np.log(df['Close']).diff()
         df['Lag1'] = df['Log_Return'].shift(1)
@@ -152,9 +153,15 @@ class VolatilityPredictor:
                 X_train = pd.concat(X_all)
                 y_train = pd.concat(y_all)
                 
-                model = LogisticRegression(random_state=42, max_iter=1000, class_weight='balanced')
-                model.fit(X_train, y_train.astype(int))
+                # Scale features for logistic regression
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                
+                model = LogisticRegression(random_state=42, max_iter=500, class_weight='balanced', n_jobs=-1)
+                model.fit(X_train_scaled, y_train.astype(int))
+                
                 self.directional_sector_models[sector] = model
+                self.scalers[sector] = scaler
                 logger.info(f"✅ Directional {sector} Model Trained.")
             else:
                 logger.warning(f"❌ Could not train Directional {sector} model.")
@@ -205,7 +212,7 @@ class VolatilityPredictor:
             return "IT"
         if symbol in ["RELIANCE", "ONGC", "NTPC", "POWERGRID", "BPCL", "COALINDIA"]:
             return "ENERGY"
-        if symbol in ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOT"]:
+        if symbol in ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOTOCO"]:
             return "AUTO"
         return "GENERIC"
 
@@ -219,8 +226,9 @@ class VolatilityPredictor:
         # Select appropriate model
         sector = self.get_sector(symbol)
         model = self.directional_sector_models.get(sector, self.directional_sector_models.get("GENERIC"))
+        scaler = self.scalers.get(sector, self.scalers.get("GENERIC"))
         
-        if not model:
+        if not model or not scaler:
             return None
             
         # Fetch data for prediction
@@ -229,9 +237,12 @@ class VolatilityPredictor:
         
         latest = X.iloc[[-1]]
         
-        # Get prediction probability
+        # Scale the features
         try:
-            prob = model.predict_proba(latest)[0][1]  # Probability of going UP
+            latest_scaled = scaler.transform(latest)
+            
+            # Get prediction probability
+            prob = model.predict_proba(latest_scaled)[0][1]  # Probability of going UP
             prediction = "UP" if prob > 0.5 else "DOWN"
             confidence = max(prob, 1-prob) * 100
             
@@ -357,9 +368,21 @@ class VolatilityPredictor:
                 dir_pred = self.predict_direction(symbol, horizon)
                 if dir_pred:
                     directional_predictions[horizon] = dir_pred
+                else:
+                    directional_predictions[horizon] = {
+                        "direction": "N/A",
+                        "confidence": "N/A",
+                        "probability_up": 0.0,
+                        "horizon": horizon
+                    }
             except Exception as e:
                 logger.warning(f"Could not get directional prediction for {symbol} {horizon}: {e}")
-                directional_predictions[horizon] = None
+                directional_predictions[horizon] = {
+                    "direction": "N/A",
+                    "confidence": "N/A",
+                    "probability_up": 0.0,
+                    "horizon": horizon
+                }
         
         return {
             "Symbol": symbol,
