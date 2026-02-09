@@ -263,11 +263,11 @@ else:
                         
                         # Logic for Iron Condor / Credit Spreads
                         if "CONDOR" in result['Strategy'] or "SPREAD" in result['Strategy']:
-                            c1, c2 = st.columns(2)
-                            with c1:
+                            col_sell, col_buy = st.columns(2)
+                            with col_sell:
                                 st.markdown("🔴 **SELL** (Income Leg)")
                                 st.code(f"{setup.get('Sell Call (Short)', '-')}\n{setup.get('Sell Put (Short)', '-')}", language="text")
-                            with c2:
+                            with col_buy:
                                 st.markdown("🟢 **BUY** (Safety Leg)")
                                 st.code(f"{setup.get('Buy Call (Hedge)', '-')}\n{setup.get('Buy Put (Hedge)', '-')}", language="text")
                                 
