@@ -6,6 +6,8 @@ from src.utils.alerts import send_telegram_alert
 from src.ui.charts import plot_interactive_chart
 from src.ui.payoff import plot_payoff_diagram
 from src.features.indicators import compute_indicators
+from src.backtest.strategy_simulator import StrategyBacktester
+import plotly.express as px
 
 # --- Configuration ---
 st.set_page_config(
@@ -58,7 +60,12 @@ def get_predictor():
     pred.train("RELIANCE") 
     return pred
 
+@st.cache_resource
+def get_backtester():
+    return StrategyBacktester()
+
 predictor = get_predictor()
+backtester = get_backtester()
 
 # --- Main Page ---
 st.title("🤖 NIFTY50 Options AI Engine")
@@ -172,7 +179,7 @@ if run_analysis:
 
         # --- Visualizations ---
         st.divider()
-        tab_chart, tab_payoff, tab_fund = st.tabs(["📈 Technical Chart", "💰 Payoff Diagram", "📊 Deep Dive"])
+        tab_chart, tab_payoff, tab_backtest, tab_fund = st.tabs(["📈 Technical Chart", "💰 Payoff Diagram", "🧪 Strategy Backtest", "📊 Deep Dive"])
         
         with tab_chart:
             df_chart = predictor.connector.fetch_ohlcv(symbol, period="1y")
@@ -184,6 +191,37 @@ if run_analysis:
             fig_payoff, desc = plot_payoff_diagram(result['Strategy'], result['Live_Price'])
             st.plotly_chart(fig_payoff, use_container_width=True)
             st.info(desc)
+            
+        with tab_backtest:
+            st.markdown(f"### 🧪 Historical Performance: {symbol}")
+            st.caption("Simulating AI Strategy (Iron Condor vs Straddle) over the last 1 year.")
+            
+            if st.button("Run Backtest Simulation"):
+                with st.spinner("Simulating trades..."):
+                    trades_df, equity_curve = backtester.simulate_strategy(symbol, period="1y")
+                    
+                    if trades_df is not None and not trades_df.empty:
+                        # KPI Cards
+                        total_pnl = trades_df['PnL'].sum()
+                        win_rate = len(trades_df[trades_df['PnL'] > 0]) / len(trades_df) * 100
+                        num_trades = len(trades_df)
+                        
+                        k1, k2, k3 = st.columns(3)
+                        k1.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=f"{(total_pnl/100000)*100:.1f}% Return")
+                        k2.metric("Win Rate", f"{win_rate:.1f}%")
+                        k3.metric("Trades Executed", num_trades)
+                        
+                        # Growth Chart
+                        st.subheader("Equity Curve (Start: ₹1L)")
+                        st.line_chart(trades_df.set_index("Date")["Equity"])
+                        
+                        # Trade Log
+                        with st.expander("View Trade Log"):
+                            st.dataframe(trades_df)
+                    else:
+                        st.warning("Not enough data to backtest.")
+            else:
+                st.info("Click the button to simulate strategy performance.")
             
         with tab_fund:
             c1, c2 = st.columns(2)
