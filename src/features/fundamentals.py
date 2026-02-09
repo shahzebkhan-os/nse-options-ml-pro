@@ -79,13 +79,21 @@ def get_option_chain_summary(symbol):
             if total_loss < min_loss:
                 min_loss = total_loss
                 max_pain_strike = k
+        
+        # Create Price Lookup Map: {(strike, 'CE'): price, (strike, 'PE'): price}
+        price_map = {}
+        for _, row in calls.iterrows():
+            price_map[(row['strike'], 'CE')] = row['lastPrice']
+        for _, row in puts.iterrows():
+            price_map[(row['strike'], 'PE')] = row['lastPrice']
                 
         return {
             "PCR_OI": pcr,
             "Max_Pain": max_pain_strike,
             "Expiry": expiry,
             "Call_OI_Change": calls.get('change', pd.Series()).sum(),
-            "Put_OI_Change": puts.get('change', pd.Series()).sum()
+            "Put_OI_Change": puts.get('change', pd.Series()).sum(),
+            "Prices": price_map
         }
         
     except Exception as e:

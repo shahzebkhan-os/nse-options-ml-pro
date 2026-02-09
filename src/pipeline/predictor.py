@@ -3,6 +3,7 @@ from src.features.indicators import compute_indicators
 from src.features.sentiment import SentimentEngine
 from src.features.fundamentals import get_fundamentals, get_option_chain_summary
 from src.utils.logger import get_logger
+from src.options.bs_pricing import black_scholes
 import joblib
 import os
 import pandas as pd
@@ -63,8 +64,8 @@ class VolatilityPredictor:
         self.is_trained = True
         logger.info("Model Trained.")
 
-    def suggest_strikes(self, spot_price, strategy, options_data):
-        """Generates specific Strike Prices for the suggested strategy."""
+    def suggest_strikes(self, spot_price, strategy, options_data, vix=15.0):
+        """Generates specific Strike Prices for the suggested strategy with price lookups."""
         # Fallback for Index/Interval logic if no options data
         # Even without expiry date, we can suggest strikes based on spot price.
         
@@ -79,14 +80,26 @@ class VolatilityPredictor:
         
         # Get expiry if available, else generic
         expiry = options_data.get("Expiry", "Nearest Weekly") if options_data else "Nearest Weekly"
+        price_map = options_data.get("Prices", {}) if options_data else {}
+        
+        def get_price_str(strike, type_):
+            # Try real market data first
+            if (strike, type_) in price_map:
+                return f"{strike} {type_} (@ ₹{price_map[(strike, type_)]:.1f})"
+            
+            # Fallback to Black-Scholes
+            # Estimating time to expiry (approx 4 days for weekly or just generic 5 days)
+            t = 5/252 
+            est_price = black_scholes(spot_price, strike, t, 0.07, vix/100, "call" if type_ == "CE" else "put")
+            return f"{strike} {type_} (Est ₹{est_price:.1f})"
         
         suggestions = {}
         
         if "STRADDLE" in strategy:
             # Long Straddle: Buy ATM Call & Put
             suggestions = {
-                "Leg 1 (Buy CE)": f"{atm_strike} CE",
-                "Leg 2 (Buy PE)": f"{atm_strike} PE",
+                "Leg 1 (Buy CE)": get_price_str(atm_strike, "CE"),
+                "Leg 2 (Buy PE)": get_price_str(atm_strike, "PE"),
                 "Ideal Expiry": expiry,
                 "Note": "Pure directional volatility play."
             }
@@ -108,10 +121,10 @@ class VolatilityPredictor:
             long_pe = round((spot_price * long_pct_down) / interval) * interval
             
             suggestions = {
-                "Sell Call (Short)": f"{short_ce} CE",
-                "Buy Call (Hedge)": f"{long_ce} CE",
-                "Sell Put (Short)": f"{short_pe} PE",
-                "Buy Put (Hedge)": f"{long_pe} PE",
+                "Sell Call (Short)": get_price_str(short_ce, "CE"),
+                "Buy Call (Hedge)": get_price_str(long_ce, "CE"),
+                "Sell Put (Short)": get_price_str(short_pe, "PE"),
+                "Buy Put (Hedge)": get_price_str(long_pe, "PE"),
                 "Ideal Expiry": expiry,
                 "Note": "Collect premium. Max profit if price stays between Short strikes."
             }
@@ -129,6 +142,9 @@ class VolatilityPredictor:
         latest = X.iloc[[-1]]
         prob = self.model.predict_proba(latest)[0][1] # Prob of High Vol
         
+        # Get VIX from latest row for pricing
+        current_vix = latest['Vix_Level'].values[0] if 'Vix_Level' in latest else 15.0
+        
         regime = "HIGH VOLATILITY" if prob > 0.4 else "QUIET / RANGE-BOUND"
         strategy = "LONG STRADDLE/STRANGLE" if prob > 0.4 else "IRON CONDOR / CREDIT SPREAD"
         
@@ -139,7 +155,7 @@ class VolatilityPredictor:
         live_price, change, pct_change = self.connector.get_live_price(symbol)
         
         # 3. Generate Specific Strike Suggestions
-        trade_setup = self.suggest_strikes(live_price, strategy, options_data)
+        trade_setup = self.suggest_strikes(live_price, strategy, options_data, vix=current_vix)
         
         return {
             "Symbol": symbol,
