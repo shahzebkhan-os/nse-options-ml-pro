@@ -208,29 +208,34 @@ else:
         # Check Cache First
         if symbol in st.session_state.analysis_cache:
             result = st.session_state.analysis_cache[symbol]
-            # st.toast(f"Loaded {symbol} from Cache", icon="⚡")
         else:
-            with st.spinner(f"Running AI Models on {symbol}..."):
-                result = predictor.predict(symbol)
-                if result:
-                    st.session_state.analysis_cache[symbol] = result # Cache it
-        
-        # Reset force flag
-        st.session_state['force_display'] = False
+            # Show "Training Models..." only on first run
+            if not predictor.is_trained:
+                with st.spinner("🚀 Initializing Sector AI Models (Banking, IT, Energy)..."):
+                    result = predictor.predict(symbol)
+            else:
+                with st.spinner(f"Running AI Models on {symbol}..."):
+                    result = predictor.predict(symbol)
             
-        if result:
-            # --- Signal Card ---
-            with st.container():
-                # Color code based on regime
-                is_high_vol = "HIGH" in result["Regime"]
-                color_emoji = "🚨" if is_high_vol else "💤"
-                
-                # Top Metrics
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Live Price", f"₹{result['Live_Price']:.2f}", f"{result['Price_Change']:.2f} ({result['Pct_Change']:.2f}%)")
-                m2.metric("AI Confidence", result["Confidence"], help="Probability of the prediction (Higher is better)")
-                m3.metric("Big Move Prob", f"{result['Prob_High_Vol']:.2f}", help="Probability of >1.5% move tomorrow")
-                m4.metric("PCR (OI)", result["Options"]["PCR_OI"] if result["Options"] else "N/A", help="Put-Call Ratio (>1.2 Bullish, <0.6 Bearish)")
+            if result:
+                st.session_state.analysis_cache[symbol] = result # Cache it
+    
+    # Reset force flag
+    st.session_state['force_display'] = False
+        
+    if result:
+        # --- Signal Card ---
+        with st.container():
+            # Color code based on regime
+            is_high_vol = "HIGH" in result["Regime"]
+            color_emoji = "🚨" if is_high_vol else "💤"
+            
+            # Top Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Live Price", f"₹{result['Live_Price']:.2f}", f"{result['Price_Change']:.2f} ({result['Pct_Change']:.2f}%)")
+            m2.metric("AI Confidence", result["Confidence"], help=f"Using {result.get('Sector_Model', 'Generic')} Sector Model")
+            m3.metric("Big Move Prob", f"{result['Prob_High_Vol']:.2f}", help="Probability of >1.5% move tomorrow")
+            m4.metric("PCR (OI)", result["Options"]["PCR_OI"] if result["Options"] else "N/A", help="Put-Call Ratio (>1.2 Bullish, <0.6 Bearish)")
 
                 # The Verdict
                 st.divider()

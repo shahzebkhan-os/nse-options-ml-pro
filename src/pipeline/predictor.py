@@ -53,18 +53,76 @@ class VolatilityPredictor:
         
         return df[feature_cols], df['Target']
 
-    def train(self, symbol="RELIANCE"):
-        logger.info(f"Training Volatility Model on {symbol}...")
-        X, y = self.prepare_data(symbol)
-        if X is None or len(X) == 0:
-            logger.error("No training data")
-            return
+    def train_sector_models(self):
+        """Trains specific models for different sectors."""
+        sectors = {
+            "BANK": ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "^NSEBANK"],
+            "IT": ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM"],
+            "ENERGY": ["RELIANCE", "ONGC", "NTPC", "POWERGRID", "BPCL"],
+            "AUTO": ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO"],
+            "GENERIC": ["^NSEI", "^BSESN", "ITC", "LT", "TITAN"]
+        }
+        
+        self.sector_models = {}
+        
+        for sector, stocks in sectors.items():
+            logger.info(f"Training {sector} Model...")
+            # Aggregate data from multiple stocks in the sector to build a robust model
+            X_all, y_all = [], []
             
-        self.model.fit(X, y)
-        self.is_trained = True
-        logger.info("Model Trained.")
+            for symbol in stocks:
+                try:
+                    X, y = self.prepare_data(symbol)
+                    if X is not None and not X.empty:
+                        X_all.append(X)
+                        y_all.append(y)
+                except Exception as e:
+                    logger.warning(f"Skipping {symbol} for training: {e}")
+            
+            if X_all:
+                X_train = pd.concat(X_all)
+                y_train = np.concatenate(y_all)
+                
+                model = RandomForestClassifier(n_estimators=100, max_depth=5, 
+                                             class_weight='balanced', random_state=42, n_jobs=-1)
+                model.fit(X_train, y_train)
+                self.sector_models[sector] = model
+                logger.info(f"✅ {sector} Model Trained.")
+            else:
+                logger.warning(f"❌ Could not train {sector} model.")
 
-    def suggest_strikes(self, spot_price, strategy, options_data, vix=15.0):
+    def get_sector(self, symbol):
+        # Simple mapping
+        if symbol in ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "^NSEBANK", "INDUSINDBK", "BANKBARODA"]:
+            return "BANK"
+        if symbol in ["TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM"]:
+            return "IT"
+        if symbol in ["RELIANCE", "ONGC", "NTPC", "POWERGRID", "BPCL", "COALINDIA"]:
+            return "ENERGY"
+        if symbol in ["MARUTI", "TATAMOTORS", "M&M", "BAJAJ-AUTO", "HEROMOTOCO", "EICHERMOT"]:
+            return "AUTO"
+        return "GENERIC"
+
+    def predict(self, symbol):
+        if not self.is_trained:
+            # First time load: Train all sector models
+            self.train_sector_models() 
+            self.is_trained = True
+            
+        # Select appropriate model
+        sector = self.get_sector(symbol)
+        model = self.sector_models.get(sector, self.sector_models.get("GENERIC"))
+        
+        if not model:
+            return None # Should not happen if Generic trained
+            
+        # 1. Fetch Price Data & Run ML Prediction
+        X, _ = self.prepare_data(symbol, period="3mo")
+        if X is None or len(X) == 0: return None
+        
+        latest = X.iloc[[-1]]
+        prob = model.predict_proba(latest)[0][1] # Prob of High Vol
+        # ... (rest of function)
         """Generates specific Strike Prices for the suggested strategy with price lookups."""
         # Fallback for Index/Interval logic if no options data
         # Even without expiry date, we can suggest strikes based on spot price.
@@ -133,14 +191,23 @@ class VolatilityPredictor:
 
     def predict(self, symbol):
         if not self.is_trained:
-            self.train("RELIANCE") # Train on proxy if not trained
+            # First time load: Train all sector models
+            self.train_sector_models() 
+            self.is_trained = True
+            
+        # Select appropriate model
+        sector = self.get_sector(symbol)
+        model = self.sector_models.get(sector, self.sector_models.get("GENERIC"))
+        
+        if not model:
+            return None 
             
         # 1. Fetch Price Data & Run ML Prediction
         X, _ = self.prepare_data(symbol, period="3mo")
         if X is None or len(X) == 0: return None
         
         latest = X.iloc[[-1]]
-        prob = self.model.predict_proba(latest)[0][1] # Prob of High Vol
+        prob = model.predict_proba(latest)[0][1] # Prob of High Vol
         
         # Get VIX from latest row for pricing
         current_vix = latest['Vix_Level'].values[0] if 'Vix_Level' in latest else 15.0
@@ -166,6 +233,7 @@ class VolatilityPredictor:
             "Live_Price": live_price,
             "Price_Change": change,
             "Pct_Change": pct_change,
+            "Sector_Model": sector, # Info for UI
             "Sentiment": {
                 "Score": sent_score,
                 "Label": sent_label,
