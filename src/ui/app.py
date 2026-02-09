@@ -67,6 +67,10 @@ def get_backtester():
 predictor = get_predictor()
 backtester = get_backtester()
 
+# Initialize Session State for Cache
+if 'analysis_cache' not in st.session_state:
+    st.session_state.analysis_cache = {}
+
 # --- Main Page ---
 st.title("🤖 NIFTY50 Options AI Engine")
 st.markdown(f"**AI-Powered Volatility Regime Detection & Strategy Generator** | *Model Accuracy: ~80%*")
@@ -97,6 +101,9 @@ if run_scan:
         status_text.caption(f"Scanning {stock} ({i+1}/{len(watchlist)})...")
         res = predictor.predict(stock)
         if res:
+            # SAVE TO CACHE
+            st.session_state.analysis_cache[stock] = res
+            
             row = {
                 "Symbol": res["Symbol"],
                 "Price": f"₹{res['Live_Price']:.2f}",
@@ -117,18 +124,50 @@ if run_scan:
             color = 'red' if 'HIGH' in val else 'green'
             return f'color: {color}; font-weight: bold'
 
-        st.dataframe(
+        # Interactive Table (Selection Mode)
+        event = st.dataframe(
             df.style.applymap(highlight_regime, subset=['Regime']),
             use_container_width=True,
-            height=400
+            height=400,
+            selection_mode="single-row",
+            on_select="rerun"
         )
+        
+        # Handle Table Selection
+        if len(event.selection.rows) > 0:
+            selected_idx = event.selection.rows[0]
+            selected_symbol = df.iloc[selected_idx]["Symbol"]
+            
+            # Update cache key to trigger view
+            st.session_state['selected_from_scan'] = selected_symbol
+            st.rerun()
+            
     else:
         st.warning("No data found.")
 
-# 2. ANALYSIS LOGIC (Main Button)
-if run_analysis:
-    with st.spinner(f"Running AI Models on {symbol}..."):
-        result = predictor.predict(symbol)
+# 2. ANALYSIS LOGIC (Main Button OR Cache Selection)
+# Check if triggered from scanner
+if 'selected_from_scan' in st.session_state:
+    symbol = st.session_state['selected_from_scan']
+    del st.session_state['selected_from_scan'] # clear trigger
+    # We set a flag to force display
+    st.session_state['force_display'] = True
+
+# Logic: Run if button clicked OR force_display is set
+if run_analysis or st.session_state.get('force_display', False):
+    
+    # Check Cache First
+    if symbol in st.session_state.analysis_cache:
+        result = st.session_state.analysis_cache[symbol]
+        # st.toast(f"Loaded {symbol} from Cache", icon="⚡")
+    else:
+        with st.spinner(f"Running AI Models on {symbol}..."):
+            result = predictor.predict(symbol)
+            if result:
+                st.session_state.analysis_cache[symbol] = result # Cache it
+    
+    # Reset force flag
+    st.session_state['force_display'] = False
         
     if result:
         # --- Signal Card ---
